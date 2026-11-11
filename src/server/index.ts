@@ -106,23 +106,30 @@ async function bootstrap() {
   });
 
   fastify.get('/api/config', async () => {
+    const isProd = process.env.NODE_ENV === 'production';
     const { primaryIp, allIps } = getLanIpAddresses();
     const rawPublicUrl = (
       process.env.PUBLIC_APP_URL ||
       process.env.VITE_PUBLIC_APP_URL ||
-      ''
+      (isProd ? 'https://dprompt.mermasdigitais.com.br' : '')
     ).trim();
+    const isRawIpOrLocal =
+      /localhost|127\.0\.0\.1|0\.0\.0\.0|^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/|$)/i.test(
+        rawPublicUrl
+      );
     const publicAppUrl =
-      rawPublicUrl && !/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(rawPublicUrl)
+      rawPublicUrl && !isRawIpOrLocal
         ? rawPublicUrl.replace(/\/+$/, '')
+        : isProd
+        ? 'https://dprompt.mermasdigitais.com.br'
         : '';
 
     return {
       spotifyPlaylistUrl:
         process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '',
       roomCode: gameEngine.getState().roomCode,
-      lanIp: primaryIp,
-      allLanIps: allIps,
+      lanIp: isProd ? '' : primaryIp,
+      allLanIps: isProd ? [] : allIps,
       publicAppUrl,
     };
   });

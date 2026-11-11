@@ -1,5 +1,32 @@
+declare const __IS_PRODUCTION_BUILD__: boolean | undefined;
 declare const __DEV_LAN_IP__: string | undefined;
 declare const __PUBLIC_APP_URL__: string | undefined;
+
+const DEFAULT_PUBLIC_APP_URL = 'https://dprompt.mermasdigitais.com.br';
+
+function isRawIpOrLocalUrl(urlOrHost: string): boolean {
+  const clean = (urlOrHost || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .split('/')[0]
+    .split(':')[0]
+    .toLowerCase();
+  if (!clean) return true;
+  if (
+    clean === 'localhost' ||
+    clean === '0.0.0.0' ||
+    clean === '[::1]' ||
+    clean === '::1' ||
+    clean.endsWith('.local') ||
+    clean.endsWith('.internal')
+  ) {
+    return true;
+  }
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(clean)) {
+    return true;
+  }
+  return false;
+}
 
 export function detectMobileViewport(): boolean {
   if (typeof window === 'undefined') return false;
@@ -12,10 +39,14 @@ export function getInitialDevLanIp(): string {
 }
 
 export function getProductionPublicUrl(): string {
-  if (typeof __PUBLIC_APP_URL__ === 'string' && __PUBLIC_APP_URL__.trim()) {
+  if (
+    typeof __PUBLIC_APP_URL__ === 'string' &&
+    __PUBLIC_APP_URL__.trim() &&
+    !isRawIpOrLocalUrl(__PUBLIC_APP_URL__)
+  ) {
     return __PUBLIC_APP_URL__.trim().replace(/\/+$/, '');
   }
-  return 'https://dprompt.mermasdigitais.com.br';
+  return DEFAULT_PUBLIC_APP_URL;
 }
 
 export function resolvePlatformPlayUrl(params: {
@@ -27,35 +58,39 @@ export function resolvePlatformPlayUrl(params: {
   playDisplayUrl: string;
 } {
   const roomCode = params.roomCode || 'MDX26';
-  const isDevMode = Boolean(
-    (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV
+  const isProdBuild =
+    typeof __IS_PRODUCTION_BUILD__ === 'boolean' ? __IS_PRODUCTION_BUILD__ : false;
+  const backendPub = (params.publicAppUrl || '').trim().replace(/\/+$/, '');
+  const hasValidBackendPub = Boolean(backendPub && !isRawIpOrLocalUrl(backendPub));
+  const hasValidBuildPub = Boolean(
+    typeof __PUBLIC_APP_URL__ === 'string' &&
+      __PUBLIC_APP_URL__.trim() &&
+      !isRawIpOrLocalUrl(__PUBLIC_APP_URL__)
   );
+  const isBrowserOnPublicDomain =
+    typeof window !== 'undefined' &&
+    window.location.hostname.includes('.') &&
+    !isRawIpOrLocalUrl(window.location.hostname);
 
   // ============================================================================
-  // 1. EM PRODUÇÃO (ou acessado fora de localhost/dev)
+  // 1. EM PRODUÇÃO (ou quando PUBLIC_APP_URL / domínio público está presente)
   // SEMPRE usar o endereço público oficial da aplicação (NUNCA mostrar IP)
   // ============================================================================
-  if (!isDevMode) {
+  if (isProdBuild || hasValidBackendPub || hasValidBuildPub || isBrowserOnPublicDomain) {
     let prodOrigin = '';
 
-    // a) URL pública passada pelo backend via /api/config
-    const backendPub = (params.publicAppUrl || '').trim().replace(/\/+$/, '');
-    if (backendPub && !/localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+/i.test(backendPub)) {
+    if (hasValidBackendPub) {
       prodOrigin = backendPub;
+    } else if (hasValidBuildPub && typeof __PUBLIC_APP_URL__ === 'string') {
+      prodOrigin = __PUBLIC_APP_URL__.trim().replace(/\/+$/, '');
+    } else if (isBrowserOnPublicDomain && typeof window !== 'undefined') {
+      prodOrigin = window.location.origin.replace(/\/+$/, '');
+    } else {
+      prodOrigin = DEFAULT_PUBLIC_APP_URL;
     }
 
-    // b) Domínio público real da janela atual (ex: dprompt.mermasdigitais.com.br)
-    if (!prodOrigin && typeof window !== 'undefined') {
-      const { hostname, origin } = window.location;
-      const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
-      if (!isIp && hostname.includes('.')) {
-        prodOrigin = origin.replace(/\/+$/, '');
-      }
-    }
-
-    // c) Fallback oficial compilado / padrão
-    if (!prodOrigin) {
-      prodOrigin = getProductionPublicUrl();
+    if (!/^https?:\/\//i.test(prodOrigin)) {
+      prodOrigin = `https://${prodOrigin}`;
     }
 
     const fullUrl = `${prodOrigin}/play?room=${roomCode}`;

@@ -130,15 +130,6 @@ export const TVRankingCard: React.FC = React.memo(() => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {totalEntries > 0 && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#6E4F7D]">
-              <Users className="w-3.5 h-3.5 text-[#9747FF]" />
-              <span>
-                {Math.min(displayLimit, totalEntries)} de {totalEntries} no ranking
-              </span>
-            </span>
-          )}
-
           <div className="bg-[#F5F0FF] p-1 rounded-2xl border border-[#DDC7F8] inline-flex items-center gap-1">
             {(
               [

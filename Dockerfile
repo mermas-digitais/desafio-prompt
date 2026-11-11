@@ -5,15 +5,19 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Força NODE_ENV=development no builder para garantir instalação de devDependencies (Vite, TS) mesmo com build args de produção
-ENV NODE_ENV=development
-
 # Instala todas as dependências necessárias para a compilação
 COPY package.json package-lock.json* ./
 RUN npm install --include=dev
 
 # Copia código-fonte e arquivos de configuração
 COPY . .
+
+# Define variáveis de ambiente de produção durante o build do Vite para embutir a URL pública oficial
+ARG PUBLIC_APP_URL=https://dprompt.mermasdigitais.com.br
+ARG VITE_PUBLIC_APP_URL=https://dprompt.mermasdigitais.com.br
+ENV NODE_ENV=production
+ENV PUBLIC_APP_URL=${PUBLIC_APP_URL}
+ENV VITE_PUBLIC_APP_URL=${VITE_PUBLIC_APP_URL}
 
 # Compila o frontend (dist/public) e o servidor backend (dist/server)
 RUN npm run build
@@ -25,9 +29,11 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
+ARG PUBLIC_APP_URL=https://dprompt.mermasdigitais.com.br
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV HOST=0.0.0.0
+ENV PUBLIC_APP_URL=${PUBLIC_APP_URL}
 
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
