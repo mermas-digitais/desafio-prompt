@@ -5,9 +5,12 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Instala dependências primeiro para aproveitar cache de camadas Docker
+# Força NODE_ENV=development no builder para garantir instalação de devDependencies (Vite, TS) mesmo com build args de produção
+ENV NODE_ENV=development
+
+# Instala todas as dependências necessárias para a compilação
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install --include=dev
 
 # Copia código-fonte e arquivos de configuração
 COPY . .
