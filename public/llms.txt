@@ -1,0 +1,27 @@
+# Desafio de Prompt — MDX STEAM 2026 | Mermãs Digitais
+
+> Arena party game interativa de Inteligência Artificial e Engenharia de Prompt desenvolvida para o MDX STEAM 2026 pelo projeto Mermãs Digitais (IFMA Campus Imperatriz).
+
+O **Desafio de Prompt** é um jogo multiplayer em tempo real onde até 5 jogadoras conectam-se simultaneamente via smartphone (lendo um QR Code no telão) para adivinhar a fórmula secreta de um prompt gerador de imagem composto por 3 camadas: **Sujeito**, **Estilo Visual** e **Cenário/Ambiente**.
+
+## Informações Principais
+- **Organização:** Mermãs Digitais — IFMA Campus Imperatriz
+- **Evento:** MDX STEAM 2026
+- **Website Oficial:** https://dprompt.mermasdigitais.com.br
+- **Visão Telão (TV/Projetor):** https://dprompt.mermasdigitais.com.br/tv
+- **Controle Mobile (Jogadora):** https://dprompt.mermasdigitais.com.br/play
+- **Repositório GitHub:** https://github.com/mermas-digitais/desafio-prompt
+
+## Mecânica do Jogo
+- **Modo de Jogo:** Multiplayer Local & Remoto em Tempo Real (Socket.IO + Fastify + React)
+- **Capacidade por Sala:** Até 5 jogadoras simultâneas (Sala padrão: MDX26)
+- **Rodadas:** 5 desafios de IA progressivos por partida
+- **Tempo por Rodada:** 40 segundos para formular a resposta
+- **Pontuação:** De 0 a 1150 pontos por rodada com bônus de velocidade e precisão
+- **Progressão:** 10 Níveis de Maestria e Títulos exclusivos com persistência em PostgreSQL 18
+- **Ranking:** Classificação Geral (All-time), Diário (Hoje) e Semanal com histórico de movimentação
+
+## Links Relevantes & Documentação
+- [Documentação Completa para LLMs](https://dprompt.mermasdigitais.com.br/llms-full.txt): Especificação técnica e detalhes das 30 artes e desafios.
+- [Sitemap XML](https://dprompt.mermasdigitais.com.br/sitemap.xml): Mapa de URLs públicas indexadas.
+- [Robots.txt](https://dprompt.mermasdigitais.com.br/robots.txt): Diretrizes para indexadores e robôs.

@@ -1,0 +1,9 @@
+# Robots.txt for Desafio de Prompt — MDX STEAM 2026 (Mermãs Digitais)
+User-agent: *
+Allow: /
+Allow: /tv
+Allow: /play
+Disallow: /admin
+Disallow: /api/admin/
+
+Sitemap: https://dprompt.mermasdigitais.com.br/sitemap.xml

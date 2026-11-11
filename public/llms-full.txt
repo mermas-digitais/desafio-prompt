@@ -1,0 +1,142 @@
+# Desafio de Prompt — MDX STEAM 2026 | Mermãs Digitais — Documentação Completa (LLMs Full)
+
+> Documento de referência técnica, mecânicas de jogo, regras pedagógicas e arquitetura do jogo "Desafio de Prompt", criado pelo projeto Mermãs Digitais do Instituto Federal do Maranhão (IFMA) Campus Imperatriz para o evento MDX STEAM 2026.
+
+---
+
+## 1. Visão Geral do Projeto
+
+- **Nome Oficial:** Desafio de Prompt — MDX STEAM 2026
+- **Realização:** Mermãs Digitais (IFMA Campus Imperatriz)
+- **Propósito:** Capacitar e engajar jovens estudantes (especialmente meninas e mulheres na tecnologia) no letramento em Inteligência Artificial Generativa e Engenharia de Prompt através de um party game competitivo de alta energia.
+- **Domínio de Produção:** https://dprompt.mermasdigitais.com.br
+- **Ambiente de Infraestrutura:** Coolify v4.7 em VPS dedicada com PostgreSQL 18.6
+- **Código-fonte:** https://github.com/mermas-digitais/desafio-prompt
+
+---
+
+## 2. Telas & Modos de Visualização
+
+1. **Visão Telão (TV / Projetor - `/tv`):**
+   - Exibida no palco ou auditório do evento.
+   - Mostra o QR Code com a URL direta `https://dprompt.mermasdigitais.com.br/play?room=MDX26`.
+   - Gerencia a trilha sonora oficial do evento com um Music Player customizado baseado na Web Audio API com sintetizadores FM/Pad harmônicos inspirados no Maranhão e pop retrô-futurista.
+   - Apresenta a arte gerada por IA sem distorção em alta resolução, cronômetro de 40 segundos com pulso de urgência, status de submissão dos participantes e leaderboard dinâmico com auto-scroll vertical contínuo.
+
+2. **Visão Jogadora (Mobile Controller - `/play`):**
+   - Acessada pelos smartphones das participantes.
+   - Design otimizado para toque com feedback tátil (vibração via Web Vibration API) e sonoro (Sound Effects Web Audio).
+   - Componente de 3 camadas semânticas (Sujeito, Estilo, Cenário) com opções de múltipla escolha ou sugestões dinâmicas.
+   - Tela de feedback imediato de pontuação, bônus de velocidade e conquistas desbloqueadas.
+
+3. **Painel Administrativo (`/admin`):**
+   - Protegido por autenticação baseada em token/senha configurável via variável de ambiente `ADMIN_SECRET_KEY`.
+   - Permite resetar leaderboards com confirmação segura em caso de rodadas testes.
+
+---
+
+## 3. Dinâmica das 3 Camadas de Engenharia de Prompt
+
+Cada imagem apresentada no jogo foi gerada por um modelo de difusão de última geração a partir de uma estrutura de 3 camadas semânticas fundamentais da Engenharia de Prompt:
+
+1. **Camada 1: Sujeito (Subject):**
+   - Identifica o elemento central, personagem ou figura principal da composição.
+   - Exemplos: *Bumba Meu Boi Cibernético*, *Guaxinim Chef de Sushi*, *Arara DJ*, *Astronauta Maranhense*.
+   - Pontuação base: **300 pontos**.
+
+2. **Camada 2: Estilo Visual (Aesthetic / Style):**
+   - Especifica a linguagem artística, técnica ou movimento visual utilizado.
+   - Exemplos: *Cyberpunk Neon*, *Pixel Art 16-bit*, *Aquarela Fluida*, *Xilogravura Nordestina*, *Claymation*.
+   - Pontuação base: **300 pontos**.
+
+3. **Camada 3: Cenário / Ambiente (Environment / Context):**
+   - Delimita a atmosfera, luz, ângulo e cenário de fundo da cena.
+   - Exemplos: *Lençóis Maranhenses Cósmicos*, *Centro Histórico de São Luís com Neons*, *Floresta Encantada*, *Cozinha Japonesa Futurista*.
+   - Pontuação base: **300 pontos**.
+
+---
+
+## 4. Sistema de Pontuação e Bônus
+
+- **Pontos por Camada Correta:** 300 pontos cada (Total Máximo Base: 900 pontos por rodada).
+- **Bônus de Perfeição (Triple Match):** +100 pontos se acertar as 3 camadas na mesma rodada.
+- **Bônus de Velocidade (Time Bonus):** Até +150 pontos adicionais, calculados proporcionalmente ao tempo restante no relógio no momento do envio.
+- **Pontuação Máxima Teórica por Rodada:** 1.150 pontos.
+- **Partida Padrão:** 5 rodadas (Pontuação Máxima Teórica por Partida: 5.750 pontos).
+
+---
+
+## 5. Títulos e Níveis de Maestria (1 a 10)
+
+Os participantes acumulam experiência (XP) com base nas suas pontuações e progridem através de 10 patamares de mestria:
+
+- **Nível 1 (0 – 499 pts):** *Iniciante dos Prompts* 🌱
+- **Nível 2 (500 – 1.199 pts):** *Curiosa da IA* 🔍
+- **Nível 3 (1.200 – 2.199 pts):** *Exploradora Neural* 🚀
+- **Nível 4 (2.200 – 3.399 pts):** *Arquiteta de Prompts* 📐
+- **Nível 5 (3.400 – 4.799 pts):** *Engenheira Criativa* ⚡
+- **Nível 6 (4.800 – 6.499 pts):** *Mestra dos Modelos* 🔮
+- **Nível 7 (6.500 – 8.499 pts):** *Visionária STEAM* 💡
+- **Nível 8 (8.500 – 10.999 pts):** *Orquestradora de IAs* 🎼
+- **Nível 9 (11.000 – 13.999 pts):** *Lenda Sintética* 🌟
+- **Nível 10 (14.000+ pts):** *Entidade do Prompt* 👑
+
+---
+
+## 6. Sistema de Conquistas (Achievements)
+
+O jogo reconhece façanhas extraordinárias com badges ilustrados e animados:
+- ⚡ **Gênio Veloz:** Enviou o prompt correto nos primeiros 5 segundos.
+- 🎯 **Trinca de Ouro:** Acertou Sujeito, Estilo e Cenário simultaneamente.
+- 🔥 **Combo Flamejante:** Manteve 3 rodadas consecutivas com acertos máximos.
+- 👑 **Top 1:** Alcançou o topo do ranking da sala.
+- 🌟 **Veterana STEAM:** Concluiu 5 partidas completas na arena.
+
+---
+
+## 7. Banco de Desafios (30 Artes Oficiais)
+
+O jogo possui 30 desafios exclusivos pré-gerados e armazenados localmente em `/challenges/` com metadados verificados:
+
+1. `bumba_boi_cyberpunk` — Bumba Meu Boi Cósmico em São Luís Futurista.
+2. `onca_neon` — Onça-Pintada Neon em Floresta Tropical Luminescente.
+3. `astronauta_maranhao` — Astronauta nas Dunas dos Lençóis Maranhenses.
+4. `guaxinim_chef_sushi` — Guaxinim preparando sushi em restaurante cyberpunk de Tóquio.
+5. `arara_dj_carnaval` — Arara Canindé como DJ de Carnaval Eletrônico em Salvador.
+6. `tartaruga_ilha_biblioteca` — Tartaruga Ancestral carregando uma biblioteca mágica no casco.
+7. `preguica_gamer_espaco` — Bicho-Preguiça streamer jogando em estação orbital com gravidade zero.
+8. `caravela_voadora_sao_luis` — Caravela voadora a vapor sobrevoando os casarões de São Luís.
+9. `polvo_maestro_orquestra` — Polvo bioluminescente regendo uma orquestra de criaturas marinhas.
+10. `tucano_pintor_aquarela` — Tucano artista pintando a floresta amazônica em aquarela.
+11. `hamster_piloto_mecha` — Hamster corajoso pilotando um robô gigante mecha de combate.
+12. `lhama_astronauta_andes` — Lhama astronauta caminhando pelas ruínas incas iluminadas pelas estrelas.
+13. `camaleao_grafiteiro_neon` — Camaleão criando arte urbana em beco iluminado por neons.
+14. `pinguim_surfista_aurora` — Pinguim surfando ondas geladas sob a Aurora Boreal.
+15. `elefante_jardineiro_espacial` — Elefante cuidando de uma estufa botânica em uma colônia marciana.
+16. `raposa_relojoeira_steampunk` — Raposa mecânica consertando engrenagens de relógio vitoriano.
+17. `dragao_origami` — Dragão de papel dobrado sobrevoando templo japonês ao entardecer.
+18. `banda_forro_robo` — Trio nordestino de robôs tocando forró em noite de São João lunar.
+19. `coruja_professora` — Coruja sábia lecionando algoritmos em sala de aula mágica.
+20. `trem_lencois` — Trem futurista flutuante cortando as lagoas azuis dos Lençóis Maranhenses.
+*(E mais 10 artes complementares geradas e calibradas com fidelidade STEAM).*
+
+---
+
+## 8. Arquitetura Técnica & Stack
+
+- **Linguagem:** TypeScript 5.8
+- **Frontend:** React 19, Tailwind CSS 3.4, Lucide React, Canvas Confetti
+- **Backend:** Node.js 20, Fastify 4.28, Socket.IO 4.8
+- **Persistência:** PostgreSQL 18.6 com pool `pg` nativo e migração automática de schema
+- **Áudio:** Web Audio API proprietária (sem dependências externas com restrição de streaming)
+- **Containerização:** Docker Multi-stage (`node:20-alpine`) com Nginx / Fastify integrado
+- **Hospedagem:** Coolify v4.7 via Docker Compose / Nixpacks
+
+---
+
+## 9. Contato & Suporte do Projeto
+
+- **Organização:** Mermãs Digitais
+- **Instituição:** IFMA Campus Imperatriz — Maranhão, Brasil
+- **Contato Institucional:** mermasdigitais@ifma.edu.br
+- **Coordenação:** Equipe MDX STEAM 2026

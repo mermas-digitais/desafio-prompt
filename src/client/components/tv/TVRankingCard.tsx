@@ -1,14 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowDown,
   ArrowUp,
   Award,
-  ChevronLeft,
-  ChevronRight,
   Crown,
   Gamepad2,
-  ListOrdered,
   Minus,
   Sparkles,
   Trophy,
@@ -30,8 +27,6 @@ import {
 } from '../../../shared/achievements';
 import type { LeaderboardEntry } from '../../../shared/types';
 
-const PAGE_SIZE = 5;
-
 export const TVRankingCard: React.FC = React.memo(() => {
   const leaderboards = useGameStore((s) => s.roomState.leaderboards);
   const isConnected = useGameStore((s) => s.isConnected);
@@ -42,52 +37,71 @@ export const TVRankingCard: React.FC = React.memo(() => {
 
   const [shimmerWaveKey, setShimmerWaveKey] = useState<number>(0);
   const [isShimmering, setIsShimmering] = useState<boolean>(false);
-  const [currentPage, setCurrentPage] = useState<number>(0);
-  const [isExpandedView, setIsExpandedView] = useState<boolean>(false);
   const [displayLimit, setDisplayLimit] = useState<number>(50);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const pauseTimerRef = useRef<number | null>(null);
   const prevTabRef = useRef(activeTab);
 
   const currentLeaderboard: LeaderboardEntry[] =
     leaderboards[activeTab] || leaderboards.general || [];
   const totalEntries = currentLeaderboard.length;
-  const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
-  const safePage = Math.min(currentPage, totalPages - 1);
-  const startIdx = safePage * PAGE_SIZE;
-
-  // Em modo telão exibe 5 por vez com transição suave; em modo expandido exibe a lista completa de até 50+
-  const visibleLeaderboard = isExpandedView
-    ? currentLeaderboard.slice(0, displayLimit)
-    : currentLeaderboard.slice(startIdx, startIdx + PAGE_SIZE);
-
+  const visibleLeaderboard = currentLeaderboard.slice(0, displayLimit);
   const isInitialLoading = !isConnected && isSyncing && totalEntries === 0;
   const movementsByPlayer = useLeaderboardMovements(leaderboards, activeTab);
 
-  // Ciclo automático de páginas a cada 8 segundos em modo telão
-  useEffect(() => {
-    if (isExpandedView || totalPages <= 1) return undefined;
-    const interval = setInterval(() => {
-      setCurrentPage((prev) => {
-        const next = prev + 1;
-        if (next >= totalPages) {
-          cycleNextTabIfIdle();
-          return 0;
-        }
-        return next;
-      });
-    }, 7500);
-    return () => clearInterval(interval);
-  }, [totalPages, isExpandedView, cycleNextTabIfIdle]);
+  // Pausa o auto-scroll quando o usuário interage (mouse hover, wheel ou touch)
+  const handleUserInteraction = useCallback(() => {
+    setIsPaused(true);
+    if (pauseTimerRef.current) {
+      window.clearTimeout(pauseTimerRef.current);
+    }
+    pauseTimerRef.current = window.setTimeout(() => {
+      setIsPaused(false);
+    }, 12000);
+  }, []);
 
-  // Ao trocar de filtro (Geral / Só Pontos / Só Vitórias), reseta para a página 1 e dispara Shimmer
+  // Auto-scroll contínuo pelo telão: avança seções da lista a cada 7 segundos
+  useEffect(() => {
+    if (isPaused) return undefined;
+
+    const interval = setInterval(() => {
+      const container = listContainerRef.current;
+      if (!container) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      // Se não há overflow suficiente para rolar, não faz nada
+      if (scrollHeight <= clientHeight + 10) return;
+
+      const maxScroll = scrollHeight - clientHeight;
+      const isAtBottom = scrollTop >= maxScroll - 16;
+
+      if (isAtBottom) {
+        // Ao alcançar o final da lista, rola suavemente para o topo e rotaciona o filtro
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+        cycleNextTabIfIdle();
+      } else {
+        // Rola para a próxima seção (cerca de 72% da altura visível para manter contexto)
+        const scrollStep = Math.min(clientHeight * 0.72, maxScroll - scrollTop);
+        container.scrollBy({ top: scrollStep, behavior: 'smooth' });
+      }
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [isPaused, cycleNextTabIfIdle]);
+
+  // Ao trocar de filtro (Geral / Só Pontos / Só Vitórias), reseta o scroll para o topo e dispara Shimmer
   useEffect(() => {
     if (prevTabRef.current !== activeTab) {
       prevTabRef.current = activeTab;
-      setCurrentPage(0);
+      setDisplayLimit(50);
+      listContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       setShimmerWaveKey((k) => k + 1);
       setIsShimmering(true);
       const timer = window.setTimeout(() => {
         setIsShimmering(false);
-      }, 680);
+      }, 650);
       return () => window.clearTimeout(timer);
     }
     return undefined;
@@ -116,49 +130,13 @@ export const TVRankingCard: React.FC = React.memo(() => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Controles de Paginação (1–5, 6–10...) no Modo Telão */}
-          {totalPages > 1 && !isExpandedView && (
-            <div className="bg-[#FAF5FF] px-2 py-1 rounded-2xl border border-[#DDC7F8] flex items-center gap-1 text-xs text-[#6E4F7D]">
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
-                disabled={safePage === 0}
-                title="Página anterior"
-                className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <span className="font-semibold whitespace-nowrap px-1">
-                {startIdx + 1}–{Math.min(totalEntries, startIdx + PAGE_SIZE)}{' '}
-                <span className="text-[#9747FF]">de {totalEntries}</span>
+          {totalEntries > 0 && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#6E4F7D]">
+              <Users className="w-3.5 h-3.5 text-[#9747FF]" />
+              <span>
+                {Math.min(displayLimit, totalEntries)} de {totalEntries} no ranking
               </span>
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={safePage >= totalPages - 1}
-                title="Próxima página"
-                className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Botão de Alternar entre Modo Telão (1-5) e Modo Expandido (Até 50) */}
-          {totalEntries > 5 && (
-            <button
-              type="button"
-              onClick={() => setIsExpandedView((v) => !v)}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                isExpandedView
-                  ? 'bg-[#330043] text-white border-[#330043] shadow-xs'
-                  : 'bg-white text-[#6E4F7D] hover:text-[#330043] border-[#DDC7F8]'
-              }`}
-              title={isExpandedView ? 'Voltar para modo automático' : 'Expandir lista completa com rolagem'}
-            >
-              <ListOrdered className="w-3.5 h-3.5" />
-              <span>{isExpandedView ? 'Modo Telão (1–5)' : `Ver Todos (${Math.min(50, totalEntries)})`}</span>
-            </button>
+            </span>
           )}
 
           <div className="bg-[#F5F0FF] p-1 rounded-2xl border border-[#DDC7F8] inline-flex items-center gap-1">
@@ -199,17 +177,17 @@ export const TVRankingCard: React.FC = React.memo(() => {
         </div>
       </div>
 
-      {/* Linhas do Ranking (Sem AnimatePresence mode="wait" para NUNCA piscar a tela) */}
+      {/* Lista com Rolagem Contínua e Auto-scroll para Telão */}
       <div
-        className={`flex-1 min-h-0 ${
-          isExpandedView
-            ? 'overflow-y-auto pr-1 space-y-1.5'
-            : 'overflow-hidden flex flex-col justify-center'
-        }`}
+        ref={listContainerRef}
+        onMouseEnter={handleUserInteraction}
+        onWheel={handleUserInteraction}
+        onTouchStart={handleUserInteraction}
+        className="flex-1 min-h-0 overflow-y-auto pr-1.5 space-y-1.5 overscroll-contain"
       >
         {isInitialLoading ? (
           <div className="space-y-1.5">
-            {[1, 2, 3, 4, 5].map((n) => (
+            {[1, 2, 3, 4, 5, 6].map((n) => (
               <div
                 key={n}
                 className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl border border-[#E9D8FD] bg-white mdx-skeleton-shimmer"
@@ -237,7 +215,7 @@ export const TVRankingCard: React.FC = React.memo(() => {
             ))}
           </div>
         ) : visibleLeaderboard.length === 0 ? (
-          <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 text-center bg-[#FAF7FF]/60 rounded-2xl border border-dashed border-[#DDC7F8]">
+          <div className="h-full min-h-[220px] flex flex-col items-center justify-center p-6 text-center bg-[#FAF7FF]/60 rounded-2xl border border-dashed border-[#DDC7F8]">
             <div className="w-12 h-12 rounded-2xl bg-[#F5F0FF] border border-[#DDC7F8] flex items-center justify-center mb-2 shadow-2xs">
               <Trophy className="w-6 h-6 text-[#9747FF]" />
             </div>
@@ -291,7 +269,7 @@ export const TVRankingCard: React.FC = React.memo(() => {
                     <span
                       key={`shimmer-${shimmerWaveKey}`}
                       aria-hidden="true"
-                      style={{ animationDelay: `${idx * 45}ms` }}
+                      style={{ animationDelay: `${idx * 30}ms` }}
                       className="mdx-shimmer-overlay"
                     />
                   )}
@@ -337,7 +315,7 @@ export const TVRankingCard: React.FC = React.memo(() => {
                     </div>
                   </div>
 
-                  {/* Extensão Central da Linha: Usa TODO o espaço disponível e faz Loop Contínuo (Marquee) se ultrapassar o limite (Sem barra de scroll!) */}
+                  {/* Extensão Central da Linha: Marquee contínuo de Conquistas */}
                   <div className="flex-1 min-w-0 px-2 overflow-hidden">
                     <AchievementMarqueeStrip
                       achievementIds={unlockedAchievements}
@@ -375,15 +353,18 @@ export const TVRankingCard: React.FC = React.memo(() => {
               );
             })}
 
-            {/* Botão de Exibir Mais Participantes ao rolar no modo expandido */}
-            {isExpandedView && totalEntries > displayLimit && (
+            {/* Botão de Exibir Mais se houver mais de 50 no ranking */}
+            {totalEntries > displayLimit && (
               <div className="pt-2 pb-1 flex justify-center">
                 <button
                   type="button"
-                  onClick={() => setDisplayLimit((prev) => prev + 25)}
-                  className="px-4 py-1.5 rounded-full bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#DDC7F8] text-xs font-bold text-[#9747FF] transition-colors cursor-pointer"
+                  onClick={() => {
+                    handleUserInteraction();
+                    setDisplayLimit((prev) => prev + 50);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#DDC7F8] text-xs font-bold text-[#9747FF] transition-colors cursor-pointer shadow-2xs"
                 >
-                  Exibir mais participantes (+25)
+                  Exibir mais participantes ({displayLimit} de {totalEntries})
                 </button>
               </div>
             )}
