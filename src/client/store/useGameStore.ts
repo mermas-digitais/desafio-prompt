@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
 import type {
   AvatarId,
+  ExpiredRoundSummary,
   GameRoomState,
   PlayerProfile,
   PlayerSlot,
@@ -9,6 +10,10 @@ import type {
 
 export const DEFAULT_ROOM_STATE: GameRoomState = {
   roomCode: 'MDX26',
+  roomName: 'Arena MDX Principal',
+  isOpen: true,
+  roundId: 'init-round',
+  roundToken: 'rt-init',
   phase: 'IDLE',
   lobbyTimeLeft: 90,
   roundTimeLeft: 90,
@@ -49,6 +54,8 @@ export interface JoinRoomResponse {
   slot?: PlayerSlot;
   profile?: PlayerProfile;
   error?: string;
+  expired?: boolean;
+  roundData?: ExpiredRoundSummary;
   suggestions?: string[];
   state: GameRoomState;
 }
@@ -88,36 +95,57 @@ interface GameStoreState {
   roomState: GameRoomState;
   isConnected: boolean;
   isSyncing: boolean;
+  kickedReason: string | null;
   setRoomState: (nextState: GameRoomState) => void;
   setIsConnected: (connected: boolean) => void;
   setIsSyncing: (syncing: boolean) => void;
+  setKickedReason: (reason: string | null) => void;
   initSocketConnection: () => void;
-  identifyDevice: (deviceId: string) => Promise<IdentifyResponse>;
+  joinSessionRoom: (roomCode: string) => void;
+  openRoom: (params: {
+    roomCode: string;
+    name: string;
+    password?: string;
+  }) => Promise<{ ok: boolean; error?: string; state?: GameRoomState }>;
+  kickPlayer: (params: {
+    roomCode?: string;
+    playerId: string;
+    slot?: PlayerSlot;
+    reason?: string;
+    password?: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  identifyDevice: (deviceId: string, roomCode?: string) => Promise<IdentifyResponse>;
   registerPlayer: (params: {
     deviceId: string;
     nickname: string;
     avatar: AvatarId;
+    roomCode?: string;
   }) => Promise<RegisterResponse>;
   joinRoom: (params: {
     deviceId: string;
     nickname?: string;
     avatar?: AvatarId;
+    roomCode?: string;
+    roundToken?: string;
   }) => Promise<JoinRoomResponse>;
-  leaveRoom: (deviceId: string) => Promise<{ ok: boolean }>;
-  sendTypingDraft: (deviceId: string, draftPrompt: string) => void;
+  leaveRoom: (deviceId: string, roomCode?: string) => Promise<{ ok: boolean }>;
+  sendTypingDraft: (deviceId: string, draftPrompt: string, roomCode?: string) => void;
   submitPrompt: (
     deviceId: string,
-    prompt: string
-  ) => Promise<{ ok: boolean; state: GameRoomState }>;
-  startWithBotsNow: () => Promise<{ ok: boolean }>;
-  resetRoom: () => Promise<{ ok: boolean }>;
-  clearRanking: () => Promise<{ ok: boolean }>;
+    prompt: string,
+    roomCode?: string,
+    roundToken?: string
+  ) => Promise<{ ok: boolean; state: GameRoomState; error?: string }>;
+  startWithBotsNow: (roomCode?: string) => Promise<{ ok: boolean }>;
+  resetRoom: (roomCode?: string) => Promise<{ ok: boolean }>;
+  clearRanking: (password?: string, roomCode?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
   roomState: DEFAULT_ROOM_STATE,
   isConnected: false,
   isSyncing: false,
+  kickedReason: null,
 
   setRoomState: (nextState) => {
     if (nextState && nextState.phase) {
@@ -129,6 +157,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   setIsSyncing: (syncing) => set({ isSyncing: syncing }),
 
+  setKickedReason: (reason) => set({ kickedReason: reason }),
+
   initSocketConnection: () => {
     if (typeof window === 'undefined' || socketBoundToStore) return;
     socketBoundToStore = true;
@@ -137,7 +167,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     socket.on('connect', () => {
       set({ isConnected: true });
-      socket.emit('room:request-state', (st: GameRoomState) => {
+      const currentCode = get().roomState.roomCode || 'MDX26';
+      socket.emit('room:join-session', { roomCode: currentCode }, (st: GameRoomState) => {
         if (st && st.phase) {
           set({ roomState: st });
         }
@@ -154,9 +185,16 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       }
     });
 
+    socket.on('player:kicked', (payload: { reason?: string }) => {
+      set({
+        kickedReason: payload?.reason || 'Você foi removida da rodada pelo moderador da sala.',
+      });
+    });
+
     if (socket.connected) {
       set({ isConnected: true });
-      socket.emit('room:request-state', (st: GameRoomState) => {
+      const currentCode = get().roomState.roomCode || 'MDX26';
+      socket.emit('room:request-state', { roomCode: currentCode }, (st: GameRoomState) => {
         if (st && st.phase) {
           set({ roomState: st });
         }
@@ -173,12 +211,49 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
 
-  identifyDevice: (deviceId) => {
+  joinSessionRoom: (roomCode: string) => {
+    const socket = getSocket();
+    const clean = (roomCode || 'MDX26').toUpperCase().trim();
+    socket.emit('room:join-session', { roomCode: clean }, (st: GameRoomState) => {
+      if (st && st.phase) {
+        set({ roomState: st });
+      }
+    });
+  },
+
+  openRoom: (params) => {
     get().initSocketConnection();
     const socket = getSocket();
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('player:identify', { deviceId }, (res: IdentifyResponse) => {
+      socket.emit('moderator:open-room', params, (res: { ok: boolean; error?: string; state?: GameRoomState }) => {
+        if (res?.state && res.state.phase) {
+          set({ roomState: res.state, isSyncing: false });
+        } else {
+          set({ isSyncing: false });
+        }
+        resolve(res);
+      });
+    });
+  },
+
+  kickPlayer: (params) => {
+    const socket = getSocket();
+    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
+    return new Promise((resolve) => {
+      socket.emit('moderator:kick-player', { ...params, roomCode }, (res: { ok: boolean; error?: string }) => {
+        resolve(res);
+      });
+    });
+  },
+
+  identifyDevice: (deviceId, roomCode) => {
+    get().initSocketConnection();
+    const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
+    set({ isSyncing: true });
+    return new Promise((resolve) => {
+      socket.emit('player:identify', { deviceId, roomCode: targetRoom }, (res: IdentifyResponse) => {
         if (res?.state && res.state.phase) {
           set({ roomState: res.state, isSyncing: false });
         } else {
@@ -192,9 +267,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   registerPlayer: (params) => {
     get().initSocketConnection();
     const socket = getSocket();
+    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('player:register', params, (res: RegisterResponse) => {
+      socket.emit('player:register', { ...params, roomCode }, (res: RegisterResponse) => {
         set({ isSyncing: false });
         resolve(res);
       });
@@ -204,9 +280,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   joinRoom: (params) => {
     get().initSocketConnection();
     const socket = getSocket();
+    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
+    const roundToken = params.roundToken || get().roomState.roundToken;
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('player:join-room', params, (res: JoinRoomResponse) => {
+      socket.emit('player:join-room', { ...params, roomCode, roundToken }, (res: JoinRoomResponse) => {
         if (res?.state && res.state.phase) {
           set({ roomState: res.state, isSyncing: false });
         } else {
@@ -217,30 +295,34 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     });
   },
 
-  leaveRoom: (deviceId) => {
+  leaveRoom: (deviceId, roomCode) => {
     const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('player:leave-room', { deviceId }, (res: { ok: boolean }) => {
+      socket.emit('player:leave-room', { deviceId, roomCode: targetRoom }, (res: { ok: boolean }) => {
         set({ isSyncing: false });
         resolve(res || { ok: true });
       });
     });
   },
 
-  sendTypingDraft: (deviceId, draftPrompt) => {
+  sendTypingDraft: (deviceId, draftPrompt, roomCode) => {
     const socket = getSocket();
-    socket.emit('player:typing', { deviceId, draftPrompt });
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
+    socket.emit('player:typing', { deviceId, draftPrompt, roomCode: targetRoom });
   },
 
-  submitPrompt: (deviceId, prompt) => {
+  submitPrompt: (deviceId, prompt, roomCode, roundToken) => {
     const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
+    const token = roundToken || get().roomState.roundToken;
     set({ isSyncing: true });
     return new Promise((resolve) => {
       socket.emit(
         'player:submit-prompt',
-        { deviceId, prompt },
-        (res: { ok: boolean; state: GameRoomState }) => {
+        { deviceId, prompt, roomCode: targetRoom, roundToken: token },
+        (res: { ok: boolean; state: GameRoomState; error?: string }) => {
           if (res?.state && res.state.phase) {
             set({ roomState: res.state, isSyncing: false });
           } else {
@@ -252,33 +334,36 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     });
   },
 
-  startWithBotsNow: () => {
+  startWithBotsNow: (roomCode) => {
     const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('room:start-with-bots', {}, (res: { ok: boolean }) => {
+      socket.emit('room:start-with-bots', { roomCode: targetRoom }, (res: { ok: boolean }) => {
         set({ isSyncing: false });
         resolve(res || { ok: true });
       });
     });
   },
 
-  resetRoom: () => {
+  resetRoom: (roomCode) => {
     const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('room:reset', {}, (res: { ok: boolean }) => {
+      socket.emit('room:reset', { roomCode: targetRoom }, (res: { ok: boolean }) => {
         set({ isSyncing: false });
         resolve(res || { ok: true });
       });
     });
   },
 
-  clearRanking: () => {
+  clearRanking: (password, roomCode) => {
     const socket = getSocket();
+    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
     set({ isSyncing: true });
     return new Promise((resolve) => {
-      socket.emit('room:clear-ranking', {}, (res: { ok: boolean }) => {
+      socket.emit('room:clear-ranking', { password, roomCode: targetRoom }, (res: { ok: boolean; error?: string }) => {
         set({ isSyncing: false });
         resolve(res || { ok: true });
       });

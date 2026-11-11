@@ -51,6 +51,7 @@ export function getProductionPublicUrl(): string {
 
 export function resolvePlatformPlayUrl(params: {
   roomCode: string;
+  roundToken?: string;
   lanIp: string;
   publicAppUrl: string;
 }): {
@@ -58,6 +59,7 @@ export function resolvePlatformPlayUrl(params: {
   playDisplayUrl: string;
 } {
   const roomCode = params.roomCode || 'MDX26';
+  const roundParam = params.roundToken ? `&round=${encodeURIComponent(params.roundToken)}` : '';
   const isProdBuild =
     typeof __IS_PRODUCTION_BUILD__ === 'boolean' ? __IS_PRODUCTION_BUILD__ : false;
   const backendPub = (params.publicAppUrl || '').trim().replace(/\/+$/, '');
@@ -93,7 +95,7 @@ export function resolvePlatformPlayUrl(params: {
       prodOrigin = `https://${prodOrigin}`;
     }
 
-    const fullUrl = `${prodOrigin}/play?room=${roomCode}`;
+    const fullUrl = `${prodOrigin}/play?room=${roomCode}${roundParam}`;
     const cleanHost = prodOrigin.replace(/^https?:\/\//i, '');
     return {
       playUrl: fullUrl,
@@ -119,7 +121,7 @@ export function resolvePlatformPlayUrl(params: {
   const baseOrigin = `${protocol}//${targetHost}:${effectivePort}`;
 
   return {
-    playUrl: `${baseOrigin}/play?room=${roomCode}`,
+    playUrl: `${baseOrigin}/play?room=${roomCode}${roundParam}`,
     playDisplayUrl: `${targetHost}:${effectivePort}/play`,
   };
 }

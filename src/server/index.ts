@@ -10,6 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { database } from './db/index.js';
 import { validateNickname } from './moderation/profanityFilter.js';
 import { GameEngine } from './game/GameEngine.js';
+import { RoomManager } from './game/RoomManager.js';
 import type { AvatarId, PlayerSlot } from '../shared/types.js';
 
 const PORT = Number(process.env.PORT || 3001);
@@ -78,14 +79,19 @@ async function bootstrap() {
     transports: ['websocket', 'polling'],
   });
 
-  const gameEngine = new GameEngine(io);
-  await gameEngine.start();
+  const roomManager = new RoomManager(io);
+  await roomManager.init();
+
+  const getEngine = (roomCode?: string): GameEngine => {
+    return roomManager.getOrCreateRoom(roomCode).engine;
+  };
 
   // ============================================================================
   // REST API Endpoints
   // ============================================================================
 
-  fastify.get('/api/health', async () => {
+  fastify.get<{ Querystring: { room?: string } }>('/api/health', async (req) => {
+    const engine = getEngine(req.query?.room);
     return {
       status: 'ok',
       service: 'desafio-prompt-mdx26',
@@ -101,12 +107,15 @@ async function bootstrap() {
         ),
         localFallback: true,
       },
-      roomPhase: gameEngine.getState().phase,
+      roomPhase: engine.getState().phase,
+      roomCode: engine.getState().roomCode,
+      roomName: engine.getState().roomName,
+      isOpen: engine.getState().isOpen,
       timestamp: new Date().toISOString(),
     };
   });
 
-  fastify.get('/api/config', async () => {
+  fastify.get<{ Querystring: { room?: string } }>('/api/config', async (req) => {
     const isProd = process.env.NODE_ENV === 'production';
     const { primaryIp, allIps } = getLanIpAddresses();
     const rawPublicUrl = (
@@ -125,10 +134,16 @@ async function bootstrap() {
         ? 'https://dprompt.mermasdigitais.com.br'
         : '';
 
+    const engine = getEngine(req.query?.room);
+    const roomState = engine.getState();
+
     return {
       spotifyPlaylistUrl:
         process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '',
-      roomCode: gameEngine.getState().roomCode,
+      roomCode: roomState.roomCode,
+      roomName: roomState.roomName,
+      isOpen: roomState.isOpen,
+      roundToken: roomState.roundToken,
       lanIp: isProd ? '' : primaryIp,
       allLanIps: isProd ? [] : allIps,
       publicAppUrl,
@@ -344,7 +359,7 @@ async function bootstrap() {
     }
 
     await database.clearAllRankings();
-    await gameEngine.refreshLeaderboards();
+    await getEngine().refreshLeaderboards();
 
     const [players, leaderboards] = await Promise.all([
       database.getAllPlayersForAdmin(),
@@ -365,7 +380,7 @@ async function bootstrap() {
     }
 
     const deleted = await database.deletePlayerById(req.params.id);
-    await gameEngine.refreshLeaderboards();
+    await getEngine().refreshLeaderboards();
 
     const [players, leaderboards] = await Promise.all([
       database.getAllPlayersForAdmin(),
@@ -383,8 +398,41 @@ async function bootstrap() {
     return await database.getLeaderboards(100);
   });
 
-  fastify.get('/api/state', async () => {
-    return gameEngine.getState();
+  fastify.get<{ Querystring: { room?: string } }>('/api/state', async (req) => {
+    return getEngine(req.query?.room).getState();
+  });
+
+  fastify.get('/api/rooms', async () => {
+    return { ok: true, rooms: roomManager.listRooms() };
+  });
+
+  fastify.post<{
+    Body: { roomCode?: string; name: string; password?: string };
+  }>('/api/rooms/open', async (req, reply) => {
+    const { roomCode = 'MDX26', name, password } = req.body || {};
+    if (!verifyAdminPassword(password)) {
+      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
+    }
+    const outcome = roomManager.openRoom({ roomCode, name, password });
+    return { ok: true, state: outcome.state };
+  });
+
+  fastify.post<{
+    Body: { roomCode: string; password?: string };
+  }>('/api/rooms/close', async (req, reply) => {
+    const { roomCode, password } = req.body || {};
+    if (!verifyAdminPassword(password)) {
+      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
+    }
+    roomManager.closeRoom(roomCode);
+    return { ok: true };
+  });
+
+  fastify.get<{
+    Querystring: { room?: string; round?: string };
+  }>('/api/rounds/validate', async (req) => {
+    const engine = getEngine(req.query?.room);
+    return engine.validateRoundToken(req.query?.round);
   });
 
   fastify.post<{ Body: { nickname?: string } }>('/api/validate-nickname', async (req) => {
@@ -397,58 +445,82 @@ async function bootstrap() {
   // ============================================================================
 
   io.on('connection', (socket) => {
-    // Envia estado imediato ao conectar (TV ou Mobile)
-    socket.emit('room:state', gameEngine.getState());
+    let currentSocketRoomCode = 'MDX26';
+    socket.join(currentSocketRoomCode);
 
-    socket.on('room:request-state', (cb?: (state: unknown) => void) => {
-      const state = gameEngine.getState();
+    // Envia estado imediato ao conectar
+    socket.emit('room:state', getEngine(currentSocketRoomCode).getState());
+
+    // Associar socket a uma sala específica
+    socket.on(
+      'room:join-session',
+      (payload: { roomCode?: string }, cb?: (state: unknown) => void) => {
+        const targetCode = (payload?.roomCode || 'MDX26').toUpperCase().trim();
+        socket.leave(currentSocketRoomCode);
+        currentSocketRoomCode = targetCode;
+        socket.join(targetCode);
+        const engine = getEngine(targetCode);
+        const state = engine.getState();
+        socket.emit('room:state', state);
+        if (typeof cb === 'function') cb(state);
+      }
+    );
+
+    socket.on('room:request-state', (payload?: { roomCode?: string } | ((state: unknown) => void), cb?: (state: unknown) => void) => {
+      const callback = typeof payload === 'function' ? payload : cb;
+      const targetRoom = typeof payload === 'object' && payload?.roomCode ? payload.roomCode : currentSocketRoomCode;
+      const state = getEngine(targetRoom).getState();
       socket.emit('room:state', state);
-      if (typeof cb === 'function') cb(state);
+      if (typeof callback === 'function') callback(state);
     });
 
     // 1. Identificar dispositivo (recuperar perfil salvo e High Score)
     socket.on(
       'player:identify',
       async (
-        payload: { deviceId?: string },
+        payload: { deviceId?: string; roomCode?: string },
         cb?: (res: { ok: boolean; profile: unknown; state: unknown }) => void
       ) => {
         try {
           const deviceId = (payload?.deviceId || '').trim();
+          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+          currentSocketRoomCode = targetRoom;
+          socket.join(targetRoom);
+          const engine = getEngine(targetRoom);
+
           if (!deviceId) {
-            const resp = { ok: false, profile: null, state: gameEngine.getState() };
+            const resp = { ok: false, profile: null, state: engine.getState() };
             if (typeof cb === 'function') cb(resp);
             return;
           }
 
           const profile = await database.findPlayerByDeviceId(deviceId);
-          // Se o jogador já estava na sala atual, reconecta o socketId
           if (profile) {
-            const currentRoomPlayer = gameEngine
+            const currentRoomPlayer = engine
               .getState()
               .players.find((p) => p.deviceId === deviceId);
             if (currentRoomPlayer) {
-              gameEngine.joinRoom(profile, socket.id);
+              engine.joinRoom(profile, socket.id);
             }
           }
 
-          const resp = { ok: true, profile, state: gameEngine.getState() };
+          const resp = { ok: true, profile, state: engine.getState() };
           socket.emit('player:identified', resp);
           if (typeof cb === 'function') cb(resp);
         } catch (err) {
           console.error('❌ [Socket] Erro em player:identify:', err);
           if (typeof cb === 'function') {
-            cb({ ok: false, profile: null, state: gameEngine.getState() });
+            cb({ ok: false, profile: null, state: getEngine(currentSocketRoomCode).getState() });
           }
         }
       }
     );
 
-    // 2. Registrar / atualizar apelido e avatar (com filtro de nomes impróprios)
+    // 2. Registrar / atualizar apelido e avatar
     socket.on(
       'player:register',
       async (
-        payload: { deviceId?: string; nickname?: string; avatar?: AvatarId },
+        payload: { deviceId?: string; nickname?: string; avatar?: AvatarId; roomCode?: string },
         cb?: (res: {
           ok: boolean;
           profile?: unknown;
@@ -460,6 +532,8 @@ async function bootstrap() {
           const deviceId = (payload?.deviceId || '').trim();
           const rawNickname = payload?.nickname || '';
           const avatar: AvatarId = payload?.avatar || 'menina-mdx';
+          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+          const engine = getEngine(targetRoom);
 
           if (!deviceId) {
             const res = { ok: false, error: 'Dispositivo não identificado.' };
@@ -487,7 +561,7 @@ async function bootstrap() {
             isBot: false,
           });
 
-          await gameEngine.refreshLeaderboards();
+          await engine.refreshLeaderboards();
 
           const res = { ok: true, profile };
           socket.emit('player:register-result', res);
@@ -500,27 +574,40 @@ async function bootstrap() {
       }
     );
 
-    // 3. Entrar na sala (ocupa Slot 1..5 e dispara contador de 1m30s do Lobby)
+    // 3. Entrar na sala (com validação de sala aberta e roundToken da rodada!)
     socket.on(
       'player:join-room',
       async (
-        payload: { deviceId?: string; nickname?: string; avatar?: AvatarId },
+        payload: {
+          deviceId?: string;
+          nickname?: string;
+          avatar?: AvatarId;
+          roomCode?: string;
+          roundToken?: string;
+        },
         cb?: (res: {
           ok: boolean;
           slot?: PlayerSlot;
           profile?: unknown;
           error?: string;
+          expired?: boolean;
+          roundData?: unknown;
           suggestions?: string[];
           state: unknown;
         }) => void
       ) => {
         try {
           const deviceId = (payload?.deviceId || '').trim();
+          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+          currentSocketRoomCode = targetRoom;
+          socket.join(targetRoom);
+          const engine = getEngine(targetRoom);
+
           if (!deviceId) {
             const res = {
               ok: false,
               error: 'DeviceId obrigatório.',
-              state: gameEngine.getState(),
+              state: engine.getState(),
             };
             if (typeof cb === 'function') cb(res);
             return;
@@ -528,7 +615,6 @@ async function bootstrap() {
 
           let profile = await database.findPlayerByDeviceId(deviceId);
 
-          // Se enviou nickname junto ou ainda não tinha perfil salvo, valida e cria/atualiza
           if (payload?.nickname) {
             const validation = validateNickname(payload.nickname);
             if (!validation.valid) {
@@ -536,7 +622,7 @@ async function bootstrap() {
                 ok: false,
                 error: validation.reason,
                 suggestions: validation.suggestions,
-                state: gameEngine.getState(),
+                state: engine.getState(),
               };
               socket.emit('player:join-result', res);
               if (typeof cb === 'function') cb(res);
@@ -554,19 +640,21 @@ async function bootstrap() {
             const res = {
               ok: false,
               error: 'Registre seu apelido antes de entrar na partida!',
-              state: gameEngine.getState(),
+              state: engine.getState(),
             };
             socket.emit('player:join-result', res);
             if (typeof cb === 'function') cb(res);
             return;
           }
 
-          const joinOutcome = gameEngine.joinRoom(profile, socket.id);
+          const joinOutcome = engine.joinRoom(profile, socket.id, payload?.roundToken);
           const res = {
             ok: joinOutcome.joined,
             slot: joinOutcome.slot,
             profile,
             error: joinOutcome.reason,
+            expired: joinOutcome.expired,
+            roundData: joinOutcome.roundData,
             state: joinOutcome.state,
           };
 
@@ -578,18 +666,19 @@ async function bootstrap() {
             cb({
               ok: false,
               error: 'Erro ao entrar na sala.',
-              state: gameEngine.getState(),
+              state: getEngine(currentSocketRoomCode).getState(),
             });
           }
         }
       }
     );
 
-    // 4. Sair da sala (suporta player:leave-room e player:Leave-room)
-    const handleLeaveRoom = (payload: { deviceId?: string }, cb?: (res: { ok: boolean }) => void) => {
+    // 4. Sair da sala
+    const handleLeaveRoom = (payload: { deviceId?: string; roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
       const deviceId = (payload?.deviceId || '').trim();
+      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
       if (deviceId) {
-        gameEngine.leaveRoom(deviceId);
+        getEngine(targetRoom).leaveRoom(deviceId);
       }
       if (typeof cb === 'function') cb({ ok: true });
     };
@@ -597,49 +686,117 @@ async function bootstrap() {
     socket.on('player:leave-room', handleLeaveRoom);
     socket.on('player:Leave-room', handleLeaveRoom);
 
-    // 5. Indicador de digitação ao vivo + rascunho em tempo real
-    socket.on('player:typing', (payload: { deviceId?: string; draftPrompt?: string }) => {
+    // 5. Indicador de digitação ao vivo
+    socket.on('player:typing', (payload: { deviceId?: string; draftPrompt?: string; roomCode?: string }) => {
       const deviceId = (payload?.deviceId || '').trim();
       if (!deviceId) return;
-      gameEngine.setPlayerTyping(deviceId, payload?.draftPrompt || '');
+      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+      getEngine(targetRoom).setPlayerTyping(deviceId, payload?.draftPrompt || '');
     });
 
     // 6. Enviar e travar palpite de prompt
     socket.on(
       'player:submit-prompt',
       (
-        payload: { deviceId?: string; prompt?: string },
-        cb?: (res: { ok: boolean; state: unknown }) => void
+        payload: { deviceId?: string; prompt?: string; roomCode?: string; roundToken?: string },
+        cb?: (res: { ok: boolean; state: unknown; error?: string }) => void
       ) => {
         const deviceId = (payload?.deviceId || '').trim();
         const prompt = payload?.prompt || '';
-        const outcome = gameEngine.submitPlayerPrompt(deviceId, prompt);
+        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+        const engine = getEngine(targetRoom);
+
+        // Se enviou roundToken e está expirado:
+        if (payload?.roundToken && payload.roundToken !== engine.getState().roundToken) {
+          const res = {
+            ok: false,
+            error: 'Esta rodada já foi finalizada! O QR Code expirou.',
+            state: engine.getState(),
+          };
+          socket.emit('player:prompt-locked', res);
+          if (typeof cb === 'function') cb(res);
+          return;
+        }
+
+        const outcome = engine.submitPlayerPrompt(deviceId, prompt);
         const res = { ok: outcome.accepted, state: outcome.state };
         socket.emit('player:prompt-locked', res);
         if (typeof cb === 'function') cb(res);
       }
     );
 
-    // 7. Atalho para preencher vagas restantes com Bot Mermã imediatamente
-    const handleStartWithBots = (_payload?: unknown, cb?: (res: { ok: boolean }) => void) => {
-      gameEngine.fillBotsAndStartNow();
+    // 7. Atalho para bots
+    const handleStartWithBots = (payload?: { roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
+      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+      getEngine(targetRoom).fillBotsAndStartNow();
       if (typeof cb === 'function') cb({ ok: true });
     };
 
     socket.on('room:start-with-bots', handleStartWithBots);
     socket.on('room:fill-bots-now', handleStartWithBots);
 
-    // 8. Resetar sala para IDLE
-    socket.on('room:reset', (_payload?: unknown, cb?: (res: { ok: boolean }) => void) => {
-      gameEngine.resetToIdle();
+    // 8. Resetar sala
+    socket.on('room:reset', (payload?: { roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
+      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+      getEngine(targetRoom).resetToIdle();
       if (typeof cb === 'function') cb({ ok: true });
     });
 
-    // 9. Limpar Ranking Geral (protegido por ADMIN_PASSWORD)
+    // 9. Moderação: Abrir sala na TV com senha
+    socket.on(
+      'moderator:open-room',
+      (
+        payload: { roomCode: string; name: string; password?: string },
+        cb?: (res: { ok: boolean; error?: string; state?: unknown }) => void
+      ) => {
+        if (!verifyAdminPassword(payload?.password)) {
+          const res = { ok: false, error: 'Senha de moderador incorreta.' };
+          if (typeof cb === 'function') cb(res);
+          return;
+        }
+        const outcome = roomManager.openRoom({
+          roomCode: payload.roomCode,
+          name: payload.name,
+          password: payload.password,
+        });
+        currentSocketRoomCode = payload.roomCode.toUpperCase().trim();
+        socket.join(currentSocketRoomCode);
+        if (typeof cb === 'function') cb({ ok: true, state: outcome.state });
+      }
+    );
+
+    // 10. Moderação: Expulsar jogador da rodada (Kick Player)
+    socket.on(
+      'moderator:kick-player',
+      (
+        payload: {
+          roomCode?: string;
+          playerId: string;
+          slot?: PlayerSlot;
+          reason?: string;
+          password?: string;
+        },
+        cb?: (res: { ok: boolean; error?: string }) => void
+      ) => {
+        if (!verifyAdminPassword(payload?.password)) {
+          const res = { ok: false, error: 'Não autorizado. Senha de moderador inválida.' };
+          if (typeof cb === 'function') cb(res);
+          return;
+        }
+
+        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+        const engine = getEngine(targetRoom);
+        const outcome = engine.kickPlayer(payload.playerId || payload.slot || '', payload?.reason);
+        const res = { ok: outcome.kicked };
+        if (typeof cb === 'function') cb(res);
+      }
+    );
+
+    // 11. Limpar Ranking Geral
     socket.on(
       'room:clear-ranking',
       async (
-        payload?: { password?: string },
+        payload?: { password?: string; roomCode?: string },
         cb?: (res: { ok: boolean; error?: string }) => void
       ) => {
         if (!verifyAdminPassword(payload?.password)) {
@@ -649,13 +806,14 @@ async function bootstrap() {
           return;
         }
         await database.clearAllRankings();
-        await gameEngine.refreshLeaderboards();
+        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+        await getEngine(targetRoom).refreshLeaderboards();
         if (typeof cb === 'function') cb({ ok: true });
       }
     );
 
     socket.on('disconnect', () => {
-      gameEngine.handleDisconnect(socket.id);
+      getEngine(currentSocketRoomCode).handleDisconnect(socket.id);
     });
   });
 

@@ -5,13 +5,14 @@ import { resolvePlatformPlayUrl } from '../helpers/networkHelpers';
 
 export function useNetworkConfig() {
   const roomCode = useGameStore((s) => s.roomState.roomCode);
+  const roundToken = useGameStore((s) => s.roomState.roundToken);
   const netConfig = useTVUiStore((s) => s.netConfig);
   const updateNetConfig = useTVUiStore((s) => s.updateNetConfig);
 
   useEffect(() => {
     let active = true;
     const loadNetConfig = () => {
-      fetch('/api/config')
+      fetch(`/api/config?room=${encodeURIComponent(roomCode || 'MDX26')}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (!active || !data) return;
@@ -32,15 +33,16 @@ export function useNetworkConfig() {
       clearTimeout(retry1);
       clearTimeout(retry2);
     };
-  }, [updateNetConfig]);
+  }, [updateNetConfig, roomCode]);
 
   return useMemo(
     () =>
       resolvePlatformPlayUrl({
         roomCode,
+        roundToken,
         lanIp: netConfig.lanIp,
         publicAppUrl: netConfig.publicAppUrl,
       }),
-    [roomCode, netConfig.lanIp, netConfig.publicAppUrl]
+    [roomCode, roundToken, netConfig.lanIp, netConfig.publicAppUrl]
   );
 }

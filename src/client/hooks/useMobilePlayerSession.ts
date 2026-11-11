@@ -43,6 +43,8 @@ export function useMobilePlayerSession() {
     isSubmittingJoin,
     promptText,
     isLocallyUnlocked,
+    isExpiredQr,
+    expiredRoundData,
     setProfile,
     setNickname,
     setSelectedAvatar,
@@ -52,24 +54,55 @@ export function useMobilePlayerSession() {
     setIsSubmittingJoin,
     setPromptText,
     setIsLocallyUnlocked,
+    setIsExpiredQr,
+    setExpiredRoundData,
     syncFromServerProfile,
     resetRoundDraft,
   } = usePlayerSessionStore();
 
   const prevWordCountRef = useRef<number>(0);
 
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const currentUrlRoom = (searchParams?.get('room') || 'MDX26').toUpperCase().trim();
+  const currentUrlRound = (searchParams?.get('round') || '').trim();
+
   useEffect(() => {
     initSocketConnection();
-  }, [initSocketConnection]);
+    // Conecta o socket à sala indicada na URL
+    useGameStore.getState().joinSessionRoom(currentUrlRoom);
+  }, [initSocketConnection, currentUrlRoom]);
+
+  // Valida o QR code / token de rodada via API
+  useEffect(() => {
+    if (currentUrlRound) {
+      fetch(
+        `/api/rounds/validate?room=${encodeURIComponent(currentUrlRoom)}&round=${encodeURIComponent(
+          currentUrlRound
+        )}`
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((res) => {
+          if (res && res.status === 'EXPIRED') {
+            setIsExpiredQr(true);
+            if (res.roundData) setExpiredRoundData(res.roundData);
+          } else if (res && res.status === 'ACTIVE') {
+            setIsExpiredQr(false);
+            setExpiredRoundData(null);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentUrlRoom, currentUrlRound, setIsExpiredQr, setExpiredRoundData]);
 
   // Identifica dispositivo automaticamente ao abrir /play
   useEffect(() => {
-    identifyDevice(deviceId).then((res) => {
+    identifyDevice(deviceId, currentUrlRoom).then((res) => {
       if (res?.ok && res.profile) {
         syncFromServerProfile(res.profile);
       }
     });
-  }, [deviceId, identifyDevice, syncFromServerProfile]);
+  }, [deviceId, currentUrlRoom, identifyDevice, syncFromServerProfile]);
 
   // Sincroniza estatísticas quando uma rodada termina ou reseta rascunho na contagem
   useEffect(() => {
@@ -78,7 +111,7 @@ export function useMobilePlayerSession() {
       roomState.phase === 'PODIUM' ||
       roomState.phase === 'IDLE'
     ) {
-      identifyDevice(deviceId).then((res) => {
+      identifyDevice(deviceId, currentUrlRoom).then((res) => {
         if (res?.ok && res.profile) {
           setProfile(res.profile);
         }
@@ -88,7 +121,7 @@ export function useMobilePlayerSession() {
       resetRoundDraft();
       prevWordCountRef.current = 0;
     }
-  }, [roomState.phase, deviceId, identifyDevice, setProfile, resetRoundDraft]);
+  }, [roomState.phase, deviceId, currentUrlRoom, identifyDevice, setProfile, resetRoundDraft]);
 
   const myRoomSlot = roomState.players.find((p) => p.deviceId === deviceId);
   const myEvaluation = roomState.evaluations.find(
@@ -179,14 +212,25 @@ export function useMobilePlayerSession() {
             deviceId,
             nickname: regRes.profile?.nickname || nickname.trim(),
             avatar: selectedAvatar,
+            roomCode: currentUrlRoom,
+            roundToken: currentUrlRound,
           });
 
           if (!joinRes.ok) {
-            setErrorMsg(
-              joinRes.error || 'A sala está cheia no momento. Aguarde a próxima rodada!'
-            );
-            if (joinRes.suggestions) setSuggestions(joinRes.suggestions);
+            if (joinRes.expired) {
+              setIsExpiredQr(true);
+              if (joinRes.roundData) setExpiredRoundData(joinRes.roundData);
+              setErrorMsg(
+                joinRes.error || 'Este QR Code expirou! A rodada foi finalizada no telão.'
+              );
+            } else {
+              setErrorMsg(
+                joinRes.error || 'A sala está cheia no momento. Aguarde a próxima rodada!'
+              );
+              if (joinRes.suggestions) setSuggestions(joinRes.suggestions);
+            }
           } else {
+            setIsExpiredQr(false);
             playJoinSound();
           }
         }
@@ -198,6 +242,8 @@ export function useMobilePlayerSession() {
       deviceId,
       nickname,
       selectedAvatar,
+      currentUrlRoom,
+      currentUrlRound,
       roomState.phase,
       registerPlayer,
       joinRoom,
@@ -205,6 +251,8 @@ export function useMobilePlayerSession() {
       setSuggestions,
       setIsSubmittingJoin,
       setIsEditingProfile,
+      setIsExpiredQr,
+      setExpiredRoundData,
       syncFromServerProfile,
     ]
   );
@@ -213,7 +261,7 @@ export function useMobilePlayerSession() {
     (val: string) => {
       const sliced = val.slice(0, 320);
       setPromptText(sliced);
-      sendTypingDraft(deviceId, sliced);
+      sendTypingDraft(deviceId, sliced, currentUrlRoom);
 
       const words = sliced.trim().split(/\s+/).filter(Boolean).length;
       const prevWords = prevWordCountRef.current;
@@ -230,18 +278,24 @@ export function useMobilePlayerSession() {
       }
       prevWordCountRef.current = words;
     },
-    [deviceId, sendTypingDraft, setPromptText]
+    [deviceId, currentUrlRoom, sendTypingDraft, setPromptText]
   );
 
   const handleLockPrompt = useCallback(async () => {
     if (!promptText.trim()) return;
-    const res = await submitPrompt(deviceId, promptText.trim());
+    const res = await submitPrompt(deviceId, promptText.trim(), currentUrlRoom, currentUrlRound);
     if (res.ok) {
       setIsLocallyUnlocked(false);
       playLockInSound();
       fireCelebrationConfetti('normal');
+    } else if (res.error) {
+      setErrorMsg(res.error);
     }
-  }, [deviceId, promptText, submitPrompt, setIsLocallyUnlocked]);
+  }, [deviceId, promptText, currentUrlRoom, currentUrlRound, submitPrompt, setIsLocallyUnlocked, setErrorMsg]);
+
+  const handleLeaveCurrentRoom = useCallback(async () => {
+    return leaveRoom(deviceId, currentUrlRoom);
+  }, [deviceId, currentUrlRoom, leaveRoom]);
 
   const myPowerTier = getPlayerPowerTier(
     profile || { highScore: 0, totalScore: 0, winsCount: 0, matchesPlayed: 0 }
@@ -260,6 +314,10 @@ export function useMobilePlayerSession() {
     isSubmittingJoin,
     promptText,
     isLocked,
+    isExpiredQr,
+    expiredRoundData,
+    currentUrlRoom,
+    currentUrlRound,
     myRoomSlot,
     myEvaluation,
     myPowerTier,
@@ -269,7 +327,7 @@ export function useMobilePlayerSession() {
     setIsEditingProfile,
     setErrorMsg,
     setIsLocallyUnlocked,
-    leaveRoom,
+    leaveRoom: handleLeaveCurrentRoom,
     handlePhotoUploadChange,
     handleSaveOrJoin,
     handlePromptChange,

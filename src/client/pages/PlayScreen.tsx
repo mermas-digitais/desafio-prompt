@@ -17,6 +17,7 @@ import { PlayShareCardStudio } from '../components/play/PlayShareCardStudio';
 import { PlayPersonalMatchHistory } from '../components/play/PlayPersonalMatchHistory';
 import { PlayMatchHistoryModal } from '../components/play/PlayMatchHistoryModal';
 import { PlayImageZoomModal, PlayRankingModal } from '../components/play/PlayModals';
+import { PlayExpiredQrView } from '../components/play/PlayExpiredQrView';
 import { getAvatarMeta, isCustomPhotoAvatar } from '../components/AvatarBadge';
 import { ACHIEVEMENTS_CATALOG, type AchievementId } from '../../shared/achievements';
 import {
@@ -41,6 +42,9 @@ export const PlayScreen: React.FC = () => {
   const evaluations = useGameStore((s) => s.roomState.evaluations);
   const currentRevealIndex = useGameStore((s) => s.roomState.currentRevealIndex);
   const challenge = useGameStore((s) => s.roomState.challenge);
+  const roomName = useGameStore((s) => s.roomState.roomName);
+  const kickedReason = useGameStore((s) => s.kickedReason);
+  const setKickedReason = useGameStore((s) => s.setKickedReason);
   const setIsZoomOpen = usePlayerSessionStore((s) => s.setIsZoomOpen);
   const setIsRankingModalOpen = usePlayerSessionStore((s) => s.setIsRankingModalOpen);
   const [shareData, setShareData] = useState<ShareCardData | null>(null);
@@ -62,6 +66,10 @@ export const PlayScreen: React.FC = () => {
     isSubmittingJoin,
     promptText,
     isLocked,
+    isExpiredQr,
+    expiredRoundData,
+    currentUrlRoom,
+    currentUrlRound,
     myRoomSlot,
     myEvaluation,
     myPowerTier,
@@ -338,8 +346,100 @@ export const PlayScreen: React.FC = () => {
         {/* ÁREA DE LOBBY / JOGO (QUANDO NÃO ESTIVER NO PÓDIO ATIVO)                   */}
         {/* ========================================================================= */}
 
-        {/* ENTRADA / PERFIL DO JOGADOR */}
-        {!isShowingPodium && (!myRoomSlot || isEditingProfile) && phase !== 'REVEALING' && (
+        {/* ALERTA DE KICK / EXPULSÃO PELO MODERADOR */}
+        {kickedReason && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mermas-card p-4 border-red-300 bg-red-50 text-red-900 flex items-center justify-between gap-3 shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div className="text-xs font-quicksand">
+                <strong className="font-bold block text-sm text-red-950">
+                  Removido da sala pelo moderador
+                </strong>
+                <span className="text-red-800">{kickedReason}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setKickedReason(null)}
+              className="px-3 py-1.5 rounded-xl bg-red-200 hover:bg-red-300 font-quicksand font-bold text-xs text-red-950 transition-colors shrink-0"
+            >
+              Entendido
+            </button>
+          </motion.div>
+        )}
+
+        {/* QR CODE EXPIRADO (QUANDO A RODADA JÁ ENCERROU OU QR É ANTIGO) */}
+        {!isShowingPodium && isExpiredQr && !myRoomSlot && (
+          <PlayExpiredQrView
+            roomName={roomName}
+            roomCode={currentUrlRoom}
+            roundToken={currentUrlRound}
+            profile={profile}
+            myPowerTier={myPowerTier}
+            myAchievements={myAchievements}
+            expiredRoundData={expiredRoundData}
+            onRefreshCheck={() => window.location.reload()}
+            onViewPodium={
+              expiredRoundData
+                ? () => {
+                    const myEv =
+                      expiredRoundData.evaluations.find((e) => e.playerId === deviceId) ||
+                      expiredRoundData.evaluations[0];
+                    if (myEv) {
+                      const sorted = [...expiredRoundData.evaluations].sort(
+                        (a, b) => b.totalScore - a.totalScore
+                      );
+                      const myRank = Math.max(
+                        1,
+                        sorted.findIndex((e) => e.playerId === myEv.playerId) + 1
+                      );
+                      const fallbackShare: ShareCardData = {
+                        nickname: myEv.nickname,
+                        avatarSrc: isCustomPhotoAvatar(myEv.avatar)
+                          ? String(myEv.avatar)
+                          : getAvatarMeta(myEv.avatar).src,
+                        tierTitle: myPowerTier.title,
+                        powerLevel: myPowerTier.level,
+                        totalPwr: myPowerTier.powerScore,
+                        rank: myRank,
+                        totalPlayers: expiredRoundData.evaluations.length,
+                        totalScore: myEv.totalScore,
+                        subjectScore: myEv.subjectScore,
+                        styleScore: myEv.styleScore,
+                        detailsScore: myEv.detailsScore,
+                        speedBonus: myEv.speedBonus,
+                        isNewHighScore: myEv.isNewHighScore,
+                        challengeTitle: expiredRoundData.challengeTitle,
+                        challengeImageUrl: expiredRoundData.challengeImageUrl,
+                        achievements: [],
+                      };
+                      setSelectedHistoryMatch({
+                        id: expiredRoundData.roundId,
+                        timestamp: new Date(expiredRoundData.finishedAt).getTime() || Date.now(),
+                        challenge: {
+                          id: expiredRoundData.roundId,
+                          title: expiredRoundData.challengeTitle,
+                          imageUrl: expiredRoundData.challengeImageUrl,
+                        },
+                        myEvaluation: myEv,
+                        allEvaluations: expiredRoundData.evaluations,
+                        myRank,
+                        totalPlayers: expiredRoundData.evaluations.length,
+                        shareData: fallbackShare,
+                      });
+                    }
+                  }
+                : undefined
+            }
+          />
+        )}
+
+        {/* ENTRADA / PERFIL DO JOGADOR (QUANDO QR VÁLIDO E NÃO ESTIVER NA SALA) */}
+        {!isShowingPodium && !isExpiredQr && (!myRoomSlot || isEditingProfile) && phase !== 'REVEALING' && (
           <PlayProfileCard
             profile={profile}
             nickname={nickname}
@@ -364,7 +464,7 @@ export const PlayScreen: React.FC = () => {
           <PlayLobbyCard
             myRoomSlot={myRoomSlot}
             myPowerTier={myPowerTier}
-            onLeaveRoom={() => leaveRoom(deviceId)}
+            onLeaveRoom={() => leaveRoom()}
           />
         )}
 

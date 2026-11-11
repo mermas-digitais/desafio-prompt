@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, RotateCcw, Zap } from 'lucide-react';
+import { Lightbulb, RotateCcw, Shield, Zap } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
 import { useNetworkConfig } from '../hooks/useNetworkConfig';
@@ -18,11 +18,16 @@ import { TVPlayingView } from '../components/tv/TVPlayingView';
 import { TVEvaluatingView } from '../components/tv/TVEvaluatingView';
 import { TVRevealingView } from '../components/tv/TVRevealingView';
 import { TVPodiumView } from '../components/tv/TVPodiumView';
+import { TVModerationModal } from '../components/tv/TVModerationModal';
 
 export const TVScreen: React.FC = () => {
-  const phase = useGameStore((s) => s.roomState.phase);
+  const roomState = useGameStore((s) => s.roomState);
+  const phase = roomState.phase;
   const initSocketConnection = useGameStore((s) => s.initSocketConnection);
+  const joinSessionRoom = useGameStore((s) => s.joinSessionRoom);
   const resetRoom = useGameStore((s) => s.resetRoom);
+
+  const [isModerationOpen, setIsModerationOpen] = useState(false);
 
   const isMuted = useTVUiStore((s) => s.isMuted);
   const toggleMute = useTVUiStore((s) => s.toggleMute);
@@ -31,7 +36,14 @@ export const TVScreen: React.FC = () => {
 
   useEffect(() => {
     initSocketConnection();
-  }, [initSocketConnection]);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlRoom = params.get('room');
+      if (urlRoom && urlRoom.toUpperCase() !== roomState.roomCode) {
+        joinSessionRoom(urlRoom.toUpperCase());
+      }
+    }
+  }, [initSocketConnection, joinSessionRoom, roomState.roomCode]);
 
   // Hooks modulares de URL local/produção, posicionamento persistente da rádio e coreografia sonora
   const { playUrl, playDisplayUrl } = useNetworkConfig();
@@ -49,30 +61,48 @@ export const TVScreen: React.FC = () => {
         intensity={phase === 'PLAYING' || phase === 'REVEALING' ? 'excited' : 'calm'}
       />
 
-      {/* Cabeçalho Oficial Limpo (Com slot reservado para o Player menor durante o modo de jogo!) */}
+      {/* Cabeçalho Oficial Limpo (Com badge de Moderação e slot reservado para Player de música) */}
       <BandeirolasHeader
         mode="tv"
         isMuted={isMuted}
         onToggleMute={toggleMute}
         rightSlot={
-          isInGameHeaderMode ? (
-            <div className="flex items-center gap-2.5">
-              <div
-                ref={headerRadioSlotRef}
-                className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
-                aria-hidden="true"
+          <div className="flex items-center gap-2">
+            {/* Botão de Moderação da Sessão */}
+            <button
+              type="button"
+              onClick={() => setIsModerationOpen(true)}
+              title="Abrir Painel de Moderação da Sala"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] cursor-pointer transition-colors shadow-2xs whitespace-nowrap"
+            >
+              <Shield className="w-3.5 h-3.5 text-[#9747FF]" />
+              <span className="hidden md:inline">{roomState.roomName || roomState.roomCode}</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  roomState.isOpen ? 'bg-emerald-500' : 'bg-amber-400'
+                }`}
               />
-              <button
-                type="button"
-                onClick={() => resetRoom()}
-                title="Voltar ao Ranking Geral"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] cursor-pointer transition-colors shadow-xs whitespace-nowrap"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-[#9747FF]" />
-                <span className="hidden xl:inline">Reiniciar</span>
-              </button>
-            </div>
-          ) : null
+            </button>
+
+            {isInGameHeaderMode && (
+              <>
+                <div
+                  ref={headerRadioSlotRef}
+                  className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
+                  aria-hidden="true"
+                />
+                <button
+                  type="button"
+                  onClick={() => resetRoom()}
+                  title="Voltar ao Ranking Geral"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] cursor-pointer transition-colors shadow-xs whitespace-nowrap"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-[#9747FF]" />
+                  <span className="hidden xl:inline">Reiniciar</span>
+                </button>
+              </>
+            )}
+          </div>
         }
       />
 
@@ -184,7 +214,11 @@ export const TVScreen: React.FC = () => {
                 className="w-full h-[126px] shrink-0"
                 aria-hidden="true"
               />
-              <TVQrCodeJoinCard playUrl={playUrl} playDisplayUrl={playDisplayUrl} />
+              <TVQrCodeJoinCard
+                playUrl={playUrl}
+                playDisplayUrl={playDisplayUrl}
+                onOpenModeration={() => setIsModerationOpen(true)}
+              />
             </div>
           </motion.div>
         )}
@@ -201,6 +235,13 @@ export const TVScreen: React.FC = () => {
 
         {phase === 'PODIUM' && <TVPodiumView />}
       </main>
+
+      {/* MODAL DE MODERAÇÃO E GESTÃO DE SESSÃO DA TV */}
+      <TVModerationModal
+        isOpen={isModerationOpen}
+        onClose={() => setIsModerationOpen(false)}
+        currentRoomCode={roomState.roomCode}
+      />
     </div>
   );
 };

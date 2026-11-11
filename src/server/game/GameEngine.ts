@@ -12,6 +12,7 @@ import {
   MAX_ROOM_PLAYERS,
   type AvatarId,
   type ChallengePublicView,
+  type ExpiredRoundSummary,
   type GamePhase,
   type GameRoomState,
   type LeaderboardsPayload,
@@ -38,7 +39,13 @@ const BOT_PROFILES: Array<{ nickname: string; avatar: AvatarId }> = [
 
 export class GameEngine {
   private io: SocketIOServer;
-  private roomCode = 'MDX26';
+  private roomCode: string;
+  private roomName: string;
+  private isOpen: boolean;
+  private roundId: string;
+  private roundToken: string;
+  private completedRounds = new Map<string, ExpiredRoundSummary>();
+
   private phase: GamePhase = 'IDLE';
   private lobbyTimeLeft = 90;
   private roundTimeLeft = 90;
@@ -62,8 +69,144 @@ export class GameEngine {
   private botSchedules: BotTargetSchedule[] = [];
   private isEvaluating = false;
 
-  constructor(io: SocketIOServer) {
+  constructor(
+    io: SocketIOServer,
+    roomCode = 'MDX26',
+    roomName = 'Arena MDX Principal',
+    isOpen = true
+  ) {
     this.io = io;
+    this.roomCode = roomCode.toUpperCase().trim();
+    this.roomName = roomName;
+    this.isOpen = isOpen;
+    this.roundId = `rnd_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
+    this.roundToken = `rt_${this.roomCode.toLowerCase()}_${this.roundId}`;
+  }
+
+  public generateNewRoundToken(): string {
+    this.roundId = `rnd_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
+    this.roundToken = `rt_${this.roomCode.toLowerCase()}_${this.roundId}`;
+    return this.roundToken;
+  }
+
+  private archiveCurrentRound(): void {
+    if (this.evaluations.length === 0) return;
+    const sorted = [...this.evaluations].sort((a, b) => b.totalScore - a.totalScore);
+    const winner = sorted[0];
+    this.completedRounds.set(this.roundToken, {
+      roundId: this.roundId,
+      roundToken: this.roundToken,
+      roomCode: this.roomCode,
+      roomName: this.roomName,
+      finishedAt: new Date().toISOString(),
+      challengeTitle: this.currentChallenge?.title || 'Desafio de Prompt',
+      challengeImageUrl: this.currentChallenge?.imageUrl || '',
+      winnerNickname: winner ? winner.nickname : null,
+      winnerScore: winner ? winner.totalScore : null,
+      evaluations: [...this.evaluations],
+    });
+  }
+
+  public validateRoundToken(token?: string): {
+    valid: boolean;
+    status: 'ACTIVE' | 'EXPIRED' | 'NOT_FOUND' | 'ROOM_CLOSED';
+    roomName: string;
+    roomCode: string;
+    roundData?: ExpiredRoundSummary;
+  } {
+    if (!this.isOpen) {
+      return {
+        valid: false,
+        status: 'ROOM_CLOSED',
+        roomName: this.roomName,
+        roomCode: this.roomCode,
+      };
+    }
+
+    if (!token) {
+      return {
+        valid: false,
+        status: 'NOT_FOUND',
+        roomName: this.roomName,
+        roomCode: this.roomCode,
+      };
+    }
+
+    if (token === this.roundToken) {
+      return {
+        valid: true,
+        status: 'ACTIVE',
+        roomName: this.roomName,
+        roomCode: this.roomCode,
+      };
+    }
+
+    const archived = this.completedRounds.get(token);
+    if (archived) {
+      return {
+        valid: false,
+        status: 'EXPIRED',
+        roomName: this.roomName,
+        roomCode: this.roomCode,
+        roundData: archived,
+      };
+    }
+
+    return {
+      valid: false,
+      status: 'EXPIRED',
+      roomName: this.roomName,
+      roomCode: this.roomCode,
+    };
+  }
+
+  public openRoom(params: { name?: string }): { ok: boolean } {
+    if (params.name) {
+      this.roomName = params.name.trim();
+    }
+    this.isOpen = true;
+    this.generateNewRoundToken();
+    this.broadcastState();
+    return { ok: true };
+  }
+
+  public closeRoom(): void {
+    this.isOpen = false;
+    this.resetToIdle();
+    this.broadcastState();
+  }
+
+  public kickPlayer(
+    playerIdOrSlot: string | number,
+    reason = 'Removido pelo moderador da sala'
+  ): { kicked: boolean; player?: RoomPlayer } {
+    const idx = this.players.findIndex(
+      (p) =>
+        p.id === playerIdOrSlot ||
+        p.slot === playerIdOrSlot ||
+        p.deviceId === playerIdOrSlot
+    );
+    if (idx === -1) return { kicked: false };
+
+    const removed = this.players.splice(idx, 1)[0];
+    if (removed.socketId) {
+      this.io.to(removed.socketId).emit('player:kicked', {
+        reason,
+        roomCode: this.roomCode,
+        roomName: this.roomName,
+      });
+    }
+
+    if (this.phase === 'LOBBY' || this.phase === 'IDLE') {
+      const remainingHumans = this.players.filter((p) => !p.isBot);
+      if (remainingHumans.length === 0) {
+        this.resetToIdle();
+        return { kicked: true, player: removed };
+      }
+    }
+
+    this.broadcastState();
+    return { kicked: true, player: removed };
   }
 
   public async start(): Promise<void> {
@@ -192,6 +335,10 @@ export class GameEngine {
   public getState(): GameRoomState {
     return {
       roomCode: this.roomCode,
+      roomName: this.roomName,
+      isOpen: this.isOpen,
+      roundId: this.roundId,
+      roundToken: this.roundToken,
       phase: this.phase,
       lobbyTimeLeft: this.lobbyTimeLeft,
       roundTimeLeft: this.roundTimeLeft,
@@ -207,7 +354,11 @@ export class GameEngine {
   }
 
   public broadcastState(): void {
-    this.io.emit('room:state', this.getState());
+    const state = this.getState();
+    this.io.to(this.roomCode).emit('room:state', state);
+    if (this.roomCode === 'MDX26') {
+      this.io.emit('room:state', state);
+    }
   }
 
   public async refreshLeaderboards(): Promise<LeaderboardsPayload> {
@@ -216,12 +367,36 @@ export class GameEngine {
     return this.leaderboards;
   }
 
-  public joinRoom(profile: PlayerProfile, socketId: string): {
+  public joinRoom(
+    profile: PlayerProfile,
+    socketId: string,
+    roundToken?: string
+  ): {
     joined: boolean;
     slot?: PlayerSlot;
     reason?: string;
+    expired?: boolean;
+    roundData?: ExpiredRoundSummary;
     state: GameRoomState;
   } {
+    if (!this.isOpen) {
+      return {
+        joined: false,
+        reason: 'Esta sala ainda não foi declarada aberta pelo moderador na TV.',
+        state: this.getState(),
+      };
+    }
+
+    if (roundToken && roundToken !== this.roundToken) {
+      const archived = this.completedRounds.get(roundToken);
+      return {
+        joined: false,
+        expired: true,
+        roundData: archived,
+        reason: 'Este QR Code expirou! A rodada foi finalizada. Aponte para o novo QR Code exibido na TV!',
+        state: this.getState(),
+      };
+    }
     // Verifica se o jogador já está em algum slot (reconexão de celular)
     const existing = this.players.find((p) => p.deviceId === profile.deviceId);
     if (existing) {
@@ -620,6 +795,8 @@ export class GameEngine {
   }
 
   public resetToIdle(): void {
+    this.archiveCurrentRound();
+    this.generateNewRoundToken();
     this.phase = 'IDLE';
     this.lobbyTimeLeft = 90;
     this.roundTimeLeft = 90;
@@ -632,6 +809,7 @@ export class GameEngine {
     this.podiumTimeLeft = 10;
     this.botSchedules = [];
     this.isEvaluating = false;
+    this.pickNextChallenge();
     this.broadcastState();
   }
 

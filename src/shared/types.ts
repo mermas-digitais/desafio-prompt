@@ -137,8 +137,25 @@ export interface LeaderboardsPayload {
   };
 }
 
+export interface ExpiredRoundSummary {
+  roundId: string;
+  roundToken: string;
+  roomCode: string;
+  roomName: string;
+  finishedAt: string;
+  challengeTitle: string;
+  challengeImageUrl: string;
+  winnerNickname: string | null;
+  winnerScore: number | null;
+  evaluations: PlayerRoundEvaluation[];
+}
+
 export interface GameRoomState {
   roomCode: string;
+  roomName: string;
+  isOpen: boolean;
+  roundId: string;
+  roundToken: string;
   phase: GamePhase;
   lobbyTimeLeft: number;        // 90s (1m30s) até Bot Mermã completar a sala
   roundTimeLeft: number;        // 90s (1m30s) de partida

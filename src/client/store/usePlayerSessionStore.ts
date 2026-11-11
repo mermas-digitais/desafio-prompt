@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getOrCreateDeviceId } from './useGameStore';
-import type { AvatarId, PlayerProfile, RankingTab } from '../../shared/types';
+import type { AvatarId, ExpiredRoundSummary, PlayerProfile, RankingTab } from '../../shared/types';
 
 function getStoredNickname(): string {
   if (typeof window !== 'undefined') {
@@ -30,6 +30,8 @@ interface PlayerSessionState {
   isZoomOpen: boolean;
   isRankingModalOpen: boolean;
   mobileRankingTab: RankingTab;
+  isExpiredQr: boolean;
+  expiredRoundData: ExpiredRoundSummary | null;
   setProfile: (profile: PlayerProfile | null) => void;
   setNickname: (nickname: string) => void;
   setSelectedAvatar: (avatar: AvatarId) => void;
@@ -42,6 +44,8 @@ interface PlayerSessionState {
   setIsZoomOpen: (open: boolean) => void;
   setIsRankingModalOpen: (open: boolean) => void;
   setMobileRankingTab: (tab: RankingTab) => void;
+  setIsExpiredQr: (isExpired: boolean) => void;
+  setExpiredRoundData: (data: ExpiredRoundSummary | null) => void;
   syncFromServerProfile: (profile: PlayerProfile) => void;
   resetRoundDraft: () => void;
 }
@@ -60,6 +64,8 @@ export const usePlayerSessionStore = create<PlayerSessionState>((set) => ({
   isZoomOpen: false,
   isRankingModalOpen: false,
   mobileRankingTab: 'general',
+  isExpiredQr: false,
+  expiredRoundData: null,
 
   setProfile: (profile) => set({ profile }),
   setNickname: (nickname) => set({ nickname }),
@@ -78,6 +84,8 @@ export const usePlayerSessionStore = create<PlayerSessionState>((set) => ({
   setIsZoomOpen: (isZoomOpen) => set({ isZoomOpen }),
   setIsRankingModalOpen: (isRankingModalOpen) => set({ isRankingModalOpen }),
   setMobileRankingTab: (mobileRankingTab) => set({ mobileRankingTab }),
+  setIsExpiredQr: (isExpiredQr) => set({ isExpiredQr }),
+  setExpiredRoundData: (expiredRoundData) => set({ expiredRoundData }),
 
   syncFromServerProfile: (profile) => {
     if (typeof window !== 'undefined') {

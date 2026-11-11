@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
-import { CheckCircle2, Clock, ExternalLink, Users, Zap } from 'lucide-react';
+import { CheckCircle2, Clock, ExternalLink, Users, UserX, Zap } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { formatTimer } from '../../helpers/formatters';
 import { AvatarBadge } from '../AvatarBadge';
@@ -21,7 +21,22 @@ export interface TVLobbyViewProps {
 export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) => {
   const players = useGameStore((s) => s.roomState.players);
   const lobbyTimeLeft = useGameStore((s) => s.roomState.lobbyTimeLeft);
+  const roomCode = useGameStore((s) => s.roomState.roomCode);
   const startWithBotsNow = useGameStore((s) => s.startWithBotsNow);
+  const kickPlayer = useGameStore((s) => s.kickPlayer);
+
+  const handleKick = async (playerNickname: string, playerId: string, slot: any) => {
+    if (window.confirm(`Remover o jogador "${playerNickname}" (Slot #${slot}) desta rodada?`)) {
+      const savedPw = localStorage.getItem('mdx26_admin_password') || 'mdx2026';
+      await kickPlayer({
+        roomCode,
+        playerId,
+        slot,
+        reason: 'Removido pelo moderador da sala.',
+        password: savedPw,
+      });
+    }
+  };
 
   return (
     <motion.div
@@ -103,10 +118,27 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
                   <span className="text-[11px] font-semibold text-[#545454] bg-[#FAF7FF] px-2.5 py-0.5 rounded-full border border-[#E9D8FD]">
                     Slot #{slotNum}
                   </span>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Pronta</span>
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Pronta</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleKick(
+                          player.nickname,
+                          player.deviceId || (player as any).id,
+                          player.slot
+                        )
+                      }
+                      title={`Remover ${player.nickname} da rodada`}
+                      className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
+                    >
+                      <UserX className="w-3 h-3 text-red-500" />
+                      <span>Kick</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="my-2 flex flex-col items-center min-w-0 w-full">
