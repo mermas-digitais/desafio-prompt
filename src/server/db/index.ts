@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { OFFICIAL_CHALLENGES, type ChallengeSeedData } from './challengesData.js';
 import {
@@ -30,6 +30,7 @@ export interface StoredMatchRecord {
 
 interface LocalPlayerRow {
   id: string;
+  roomCode: string;
   deviceId: string;
   nickname: string;
   avatar: AvatarId;
@@ -67,8 +68,18 @@ class AppDatabase {
         const raw = fs.readFileSync(LOCAL_DB_FILE, 'utf-8');
         const parsed = JSON.parse(raw) as Partial<LocalDbData>;
         this.localData = {
-          players: Array.isArray(parsed.players) ? parsed.players : [],
-          matches: Array.isArray(parsed.matches) ? parsed.matches : [],
+          players: Array.isArray(parsed.players)
+            ? parsed.players.map((p) => ({
+                ...p,
+                roomCode: p.roomCode || 'MDX26',
+              }))
+            : [],
+          matches: Array.isArray(parsed.matches)
+            ? parsed.matches.map((m) => ({
+                ...m,
+                roomCode: m.roomCode || 'MDX26',
+              }))
+            : [],
         };
       } else {
         this.saveLocalStore();
@@ -169,6 +180,7 @@ class AppDatabase {
         await client.query(`
           CREATE TABLE IF NOT EXISTS players (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            room_code VARCHAR(32) NOT NULL DEFAULT 'MDX26',
             device_id VARCHAR(128) UNIQUE NOT NULL,
             nickname VARCHAR(40) NOT NULL,
             avatar TEXT NOT NULL DEFAULT 'menina-mdx',
@@ -181,11 +193,15 @@ class AppDatabase {
             updated_at TIMESTAMP NOT NULL DEFAULT NOW()
           );
 
+          ALTER TABLE players ADD COLUMN IF NOT EXISTS room_code VARCHAR(32) NOT NULL DEFAULT 'MDX26';
           ALTER TABLE players ALTER COLUMN avatar TYPE TEXT;
 
+          CREATE INDEX IF NOT EXISTS idx_players_room_code ON players (room_code);
           CREATE INDEX IF NOT EXISTS idx_players_high_score ON players (high_score DESC);
           CREATE INDEX IF NOT EXISTS idx_players_wins_count ON players (wins_count DESC);
           CREATE INDEX IF NOT EXISTS idx_players_is_bot ON players (is_bot);
+
+          UPDATE players SET room_code = 'MDX26' WHERE room_code IS NULL OR room_code = '';
 
           CREATE TABLE IF NOT EXISTS challenges (
             id VARCHAR(64) PRIMARY KEY,
@@ -210,6 +226,8 @@ class AppDatabase {
             results_json TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
           );
+
+          UPDATE matches SET room_code = 'MDX26' WHERE room_code IS NULL OR room_code = '';
         `);
       } finally {
         client.release();
@@ -283,28 +301,54 @@ class AppDatabase {
     );
   }
 
-  public async clearAllRankings(): Promise<void> {
+  public async clearAllRankings(roomCode?: string): Promise<void> {
+    const targetRoom = roomCode ? roomCode.toUpperCase().trim() : null;
     if (this.useLocalDb) {
-      this.localData.matches = [];
-      this.localData.players = this.localData.players
-        .filter((p) => !p.isBot && !p.deviceId.startsWith('seed-') && !p.deviceId.startsWith('bot-'))
-        .map((p) => ({
-          ...p,
-          highScore: 0,
-          totalScore: 0,
-          matchesPlayed: 0,
-          winsCount: 0,
-          updatedAt: new Date().toISOString(),
-        }));
+      if (targetRoom) {
+        this.localData.matches = this.localData.matches.filter((m) => m.roomCode !== targetRoom);
+        this.localData.players = this.localData.players
+          .filter((p) => !p.isBot && !p.deviceId.startsWith('seed-') && !p.deviceId.startsWith('bot-'))
+          .map((p) =>
+            p.roomCode === targetRoom
+              ? {
+                  ...p,
+                  highScore: 0,
+                  totalScore: 0,
+                  matchesPlayed: 0,
+                  winsCount: 0,
+                  updatedAt: new Date().toISOString(),
+                }
+              : p
+          );
+      } else {
+        this.localData.matches = [];
+        this.localData.players = this.localData.players
+          .filter((p) => !p.isBot && !p.deviceId.startsWith('seed-') && !p.deviceId.startsWith('bot-'))
+          .map((p) => ({
+            ...p,
+            highScore: 0,
+            totalScore: 0,
+            matchesPlayed: 0,
+            winsCount: 0,
+            updatedAt: new Date().toISOString(),
+          }));
+      }
       this.saveLocalStore();
       return;
     }
 
     const db = this.ensureDb();
-    await db.execute(sql`DELETE FROM matches`);
-    await db.execute(
-      sql`UPDATE players SET high_score = 0, total_score = 0, matches_played = 0, wins_count = 0, updated_at = NOW()`
-    );
+    if (targetRoom) {
+      await db.execute(sql`DELETE FROM matches WHERE room_code = ${targetRoom}`);
+      await db.execute(
+        sql`UPDATE players SET high_score = 0, total_score = 0, matches_played = 0, wins_count = 0, updated_at = NOW() WHERE room_code = ${targetRoom}`
+      );
+    } else {
+      await db.execute(sql`DELETE FROM matches`);
+      await db.execute(
+        sql`UPDATE players SET high_score = 0, total_score = 0, matches_played = 0, wins_count = 0, updated_at = NOW()`
+      );
+    }
     await db.execute(
       sql`DELETE FROM players WHERE is_bot = true OR device_id LIKE 'seed-%' OR device_id LIKE 'bot-%'`
     );
@@ -327,9 +371,10 @@ class AppDatabase {
     return deleted.length > 0;
   }
 
-  public async getAllPlayersForAdmin(): Promise<
+  public async getAllPlayersForAdmin(roomCode?: string): Promise<
     Array<{
       id: string;
+      roomCode: string;
       deviceId: string;
       nickname: string;
       avatar: AvatarId;
@@ -340,12 +385,14 @@ class AppDatabase {
       updatedAt: string;
     }>
   > {
+    const targetRoom = roomCode ? roomCode.toUpperCase().trim() : null;
     if (this.useLocalDb) {
       return this.localData.players
-        .filter((p) => !p.isBot)
+        .filter((p) => !p.isBot && (!targetRoom || (p.roomCode || 'MDX26') === targetRoom))
         .sort((a, b) => b.highScore - a.highScore || b.winsCount - a.winsCount)
         .map((r) => ({
           id: r.id,
+          roomCode: r.roomCode || 'MDX26',
           deviceId: r.deviceId,
           nickname: r.nickname,
           avatar: r.avatar,
@@ -358,14 +405,19 @@ class AppDatabase {
     }
 
     const db = this.ensureDb();
+    const condition = targetRoom
+      ? and(eq(schema.players.isBot, false), eq(schema.players.roomCode, targetRoom))
+      : eq(schema.players.isBot, false);
+
     const rows = await db
       .select()
       .from(schema.players)
-      .where(eq(schema.players.isBot, false))
+      .where(condition)
       .orderBy(desc(schema.players.highScore), desc(schema.players.winsCount));
 
     return rows.map((r) => ({
       id: r.id,
+      roomCode: r.roomCode,
       deviceId: r.deviceId,
       nickname: r.nickname,
       avatar: r.avatar as AvatarId,
@@ -420,13 +472,16 @@ class AppDatabase {
     nickname: string;
     avatar: AvatarId;
     isBot?: boolean;
+    roomCode?: string;
   }): Promise<PlayerProfile> {
+    const targetRoom = (params.roomCode || 'MDX26').toUpperCase().trim();
     if (this.useLocalDb) {
       const nowIso = new Date().toISOString();
       const existing = this.localData.players.find((p) => p.deviceId === params.deviceId);
       if (existing) {
         existing.nickname = params.nickname;
         existing.avatar = params.avatar;
+        existing.roomCode = targetRoom;
         existing.updatedAt = nowIso;
         this.saveLocalStore();
         return {
@@ -444,6 +499,7 @@ class AppDatabase {
 
       const inserted: LocalPlayerRow = {
         id: crypto.randomUUID(),
+        roomCode: targetRoom,
         deviceId: params.deviceId,
         nickname: params.nickname,
         avatar: params.avatar,
@@ -480,6 +536,7 @@ class AppDatabase {
         .set({
           nickname: params.nickname,
           avatar: params.avatar,
+          roomCode: targetRoom,
           updatedAt: now,
         })
         .where(eq(schema.players.deviceId, params.deviceId))
@@ -500,6 +557,7 @@ class AppDatabase {
     const [inserted] = await db
       .insert(schema.players)
       .values({
+        roomCode: targetRoom,
         deviceId: params.deviceId,
         nickname: params.nickname,
         avatar: params.avatar,
@@ -630,7 +688,8 @@ class AppDatabase {
     return OFFICIAL_CHALLENGES;
   }
 
-  public async getLeaderboards(limit = 100): Promise<LeaderboardsPayload> {
+  public async getLeaderboards(limit = 100, roomCode?: string): Promise<LeaderboardsPayload> {
+    const targetRoom = roomCode ? roomCode.toUpperCase().trim() : null;
     let rawPlayers: Array<{
       id: string;
       nickname: string;
@@ -646,7 +705,7 @@ class AppDatabase {
 
     if (this.useLocalDb) {
       rawPlayers = this.localData.players
-        .filter((r) => !r.isBot)
+        .filter((r) => !r.isBot && (!targetRoom || (r.roomCode || 'MDX26') === targetRoom))
         .map((r) => ({
           id: r.id,
           nickname: r.nickname,
@@ -658,13 +717,19 @@ class AppDatabase {
           isBot: r.isBot,
           updatedAt: r.updatedAt,
         }));
-      totalMatchesCount = this.localData.matches.length;
+      totalMatchesCount = targetRoom
+        ? this.localData.matches.filter((m) => (m.roomCode || 'MDX26') === targetRoom).length
+        : this.localData.matches.length;
     } else {
       const db = this.ensureDb();
+      const condition = targetRoom
+        ? and(eq(schema.players.isBot, false), eq(schema.players.roomCode, targetRoom))
+        : eq(schema.players.isBot, false);
+
       const rows = await db
         .select()
         .from(schema.players)
-        .where(eq(schema.players.isBot, false));
+        .where(condition);
 
       rawPlayers = rows.map((r) => ({
         id: r.id,
@@ -678,9 +743,14 @@ class AppDatabase {
         updatedAt: r.updatedAt.toISOString(),
       }));
 
-      const matchCountRes = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(schema.matches);
+      const matchCountRes = targetRoom
+        ? await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.matches)
+            .where(eq(schema.matches.roomCode, targetRoom))
+        : await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.matches);
       totalMatchesCount = matchCountRes[0]?.count ?? 0;
     }
 

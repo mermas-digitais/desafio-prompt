@@ -210,7 +210,7 @@ export class GameEngine {
   }
 
   public async start(): Promise<void> {
-    this.leaderboards = await database.getLeaderboards();
+    this.leaderboards = await database.getLeaderboards(100, this.roomCode);
     this.pickNextChallenge();
 
     if (this.tickInterval) clearInterval(this.tickInterval);
@@ -362,7 +362,7 @@ export class GameEngine {
   }
 
   public async refreshLeaderboards(): Promise<LeaderboardsPayload> {
-    this.leaderboards = await database.getLeaderboards();
+    this.leaderboards = await database.getLeaderboards(100, this.roomCode);
     this.broadcastState();
     return this.leaderboards;
   }
@@ -779,7 +779,7 @@ export class GameEngine {
       });
 
       this.evaluations = evaluations;
-      this.leaderboards = await database.getLeaderboards();
+      this.leaderboards = await database.getLeaderboards(100, this.roomCode);
 
       // Entra na fase REVEALING (1 por 1, ritmo ágil: 4s por participante para manter dinamismo na TV)
       this.phase = 'REVEALING';

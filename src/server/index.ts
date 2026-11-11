@@ -333,41 +333,45 @@ async function bootstrap() {
     };
   });
 
-  fastify.get('/api/admin/ranking', async (req, reply) => {
+  fastify.get<{ Querystring: { room?: string } }>('/api/admin/ranking', async (req, reply) => {
     const headerPwd = req.headers['x-admin-password'] as string | undefined;
     if (!verifyAdminPassword(headerPwd)) {
       return reply.code(401).send({ ok: false, error: 'Não autorizado.' });
     }
 
+    const targetRoom = req.query?.room ? req.query.room.toUpperCase().trim() : undefined;
     const [players, leaderboards] = await Promise.all([
-      database.getAllPlayersForAdmin(),
-      database.getLeaderboards(50),
+      database.getAllPlayersForAdmin(targetRoom),
+      database.getLeaderboards(50, targetRoom),
     ]);
 
     return {
       ok: true,
       database: database.getDatabaseVersion(),
+      roomCode: targetRoom || 'ALL',
       players,
       stats: leaderboards.stats,
     };
   });
 
-  fastify.post('/api/admin/clear-ranking', async (req, reply) => {
+  fastify.post<{ Body: { roomCode?: string } }>('/api/admin/clear-ranking', async (req, reply) => {
     const headerPwd = req.headers['x-admin-password'] as string | undefined;
     if (!verifyAdminPassword(headerPwd)) {
       return reply.code(401).send({ ok: false, error: 'Não autorizado.' });
     }
 
-    await database.clearAllRankings();
-    await getEngine().refreshLeaderboards();
+    const targetRoom = req.body?.roomCode ? req.body.roomCode.toUpperCase().trim() : undefined;
+    await database.clearAllRankings(targetRoom);
+    await getEngine(targetRoom).refreshLeaderboards();
 
     const [players, leaderboards] = await Promise.all([
-      database.getAllPlayersForAdmin(),
-      database.getLeaderboards(50),
+      database.getAllPlayersForAdmin(targetRoom),
+      database.getLeaderboards(50, targetRoom),
     ]);
 
     return {
       ok: true,
+      roomCode: targetRoom || 'ALL',
       players,
       stats: leaderboards.stats,
     };
@@ -394,8 +398,8 @@ async function bootstrap() {
     };
   });
 
-  fastify.get('/api/leaderboards', async () => {
-    return await database.getLeaderboards(100);
+  fastify.get<{ Querystring: { room?: string } }>('/api/leaderboards', async (req) => {
+    return await database.getLeaderboards(100, req.query?.room);
   });
 
   fastify.get<{ Querystring: { room?: string } }>('/api/state', async (req) => {
@@ -559,6 +563,7 @@ async function bootstrap() {
             nickname: validation.sanitized,
             avatar,
             isBot: false,
+            roomCode: targetRoom,
           });
 
           await engine.refreshLeaderboards();
@@ -633,6 +638,7 @@ async function bootstrap() {
               nickname: validation.sanitized,
               avatar: payload.avatar || profile?.avatar || 'menina-mdx',
               isBot: false,
+              roomCode: targetRoom,
             });
           }
 
@@ -805,8 +811,8 @@ async function bootstrap() {
           }
           return;
         }
-        await database.clearAllRankings();
         const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
+        await database.clearAllRankings(targetRoom);
         await getEngine(targetRoom).refreshLeaderboards();
         if (typeof cb === 'function') cb({ ok: true });
       }

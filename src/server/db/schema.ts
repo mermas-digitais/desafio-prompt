@@ -10,6 +10,7 @@ import {
 
 export const players = pgTable('players', {
   id: uuid('id').primaryKey().defaultRandom(),
+  roomCode: varchar('room_code', { length: 32 }).notNull().default('MDX26'),
   deviceId: varchar('device_id', { length: 128 }).unique().notNull(),
   nickname: varchar('nickname', { length: 40 }).notNull(),
   avatar: text('avatar').notNull().default('menina-mdx'),
