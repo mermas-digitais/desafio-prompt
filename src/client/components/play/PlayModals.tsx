@@ -188,6 +188,12 @@ export const PlayRankingModal: React.FC = React.memo(() => {
                   );
                 })
               )}
+
+              {entries.length > 0 && (
+                <div className="pt-2 text-center text-[11px] font-semibold text-[#6E4F7D]">
+                  Exibindo {entries.length} {entries.length === 1 ? 'jogadora' : 'jogadoras'} no Ranking Geral
+                </div>
+              )}
             </div>
           </div>
         </motion.div>

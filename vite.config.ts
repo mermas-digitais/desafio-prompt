@@ -46,6 +46,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
     __DEV_LAN_IP__: JSON.stringify(detectPrimaryLanIp()),
+    __PUBLIC_APP_URL__: JSON.stringify(
+      process.env.PUBLIC_APP_URL || process.env.VITE_PUBLIC_APP_URL || 'https://dprompt.mermasdigitais.com.br'
+    ),
   },
   resolve: {
     alias: {

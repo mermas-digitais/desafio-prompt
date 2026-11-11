@@ -452,7 +452,7 @@ class PostgresDatabase {
     return OFFICIAL_CHALLENGES;
   }
 
-  public async getLeaderboards(limit = 15): Promise<LeaderboardsPayload> {
+  public async getLeaderboards(limit = 100): Promise<LeaderboardsPayload> {
     const db = this.ensureDb();
     const rows = await db
       .select()

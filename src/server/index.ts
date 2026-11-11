@@ -372,7 +372,7 @@ async function bootstrap() {
   });
 
   fastify.get('/api/leaderboards', async () => {
-    return await database.getLeaderboards(20);
+    return await database.getLeaderboards(100);
   });
 
   fastify.get('/api/state', async () => {

@@ -4,8 +4,11 @@ import {
   ArrowDown,
   ArrowUp,
   Award,
+  ChevronLeft,
+  ChevronRight,
   Crown,
   Gamepad2,
+  ListOrdered,
   Minus,
   Sparkles,
   Trophy,
@@ -27,6 +30,8 @@ import {
 } from '../../../shared/achievements';
 import type { LeaderboardEntry } from '../../../shared/types';
 
+const PAGE_SIZE = 5;
+
 export const TVRankingCard: React.FC = React.memo(() => {
   const leaderboards = useGameStore((s) => s.roomState.leaderboards);
   const isConnected = useGameStore((s) => s.isConnected);
@@ -37,19 +42,47 @@ export const TVRankingCard: React.FC = React.memo(() => {
 
   const [shimmerWaveKey, setShimmerWaveKey] = useState<number>(0);
   const [isShimmering, setIsShimmering] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [isExpandedView, setIsExpandedView] = useState<boolean>(false);
+  const [displayLimit, setDisplayLimit] = useState<number>(50);
   const prevTabRef = useRef(activeTab);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      cycleNextTabIfIdle();
-    }, 9000);
-    return () => clearInterval(interval);
-  }, [cycleNextTabIfIdle]);
+  const currentLeaderboard: LeaderboardEntry[] =
+    leaderboards[activeTab] || leaderboards.general || [];
+  const totalEntries = currentLeaderboard.length;
+  const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages - 1);
+  const startIdx = safePage * PAGE_SIZE;
 
-  // Ao trocar de filtro (Geral / Só Pontos / Só Vitórias), dispara onda de Shimmer sem desmontar ou piscar a tela
+  // Em modo telão exibe 5 por vez com transição suave; em modo expandido exibe a lista completa de até 50+
+  const visibleLeaderboard = isExpandedView
+    ? currentLeaderboard.slice(0, displayLimit)
+    : currentLeaderboard.slice(startIdx, startIdx + PAGE_SIZE);
+
+  const isInitialLoading = !isConnected && isSyncing && totalEntries === 0;
+  const movementsByPlayer = useLeaderboardMovements(leaderboards, activeTab);
+
+  // Ciclo automático de páginas a cada 8 segundos em modo telão
+  useEffect(() => {
+    if (isExpandedView || totalPages <= 1) return undefined;
+    const interval = setInterval(() => {
+      setCurrentPage((prev) => {
+        const next = prev + 1;
+        if (next >= totalPages) {
+          cycleNextTabIfIdle();
+          return 0;
+        }
+        return next;
+      });
+    }, 7500);
+    return () => clearInterval(interval);
+  }, [totalPages, isExpandedView, cycleNextTabIfIdle]);
+
+  // Ao trocar de filtro (Geral / Só Pontos / Só Vitórias), reseta para a página 1 e dispara Shimmer
   useEffect(() => {
     if (prevTabRef.current !== activeTab) {
       prevTabRef.current = activeTab;
+      setCurrentPage(0);
       setShimmerWaveKey((k) => k + 1);
       setIsShimmering(true);
       const timer = window.setTimeout(() => {
@@ -59,12 +92,6 @@ export const TVRankingCard: React.FC = React.memo(() => {
     }
     return undefined;
   }, [activeTab]);
-
-  const currentLeaderboard: LeaderboardEntry[] =
-    leaderboards[activeTab] || leaderboards.general || [];
-  const visibleLeaderboard = currentLeaderboard.slice(0, 5);
-  const isInitialLoading = !isConnected && isSyncing && visibleLeaderboard.length === 0;
-  const movementsByPlayer = useLeaderboardMovements(leaderboards, activeTab);
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden rounded-3xl bg-white border border-[#DDC7F8] shadow-[0_12px_36px_rgba(51,0,67,0.06)] p-4 lg:p-5 flex flex-col justify-between gap-2.5">
@@ -88,7 +115,52 @@ export const TVRankingCard: React.FC = React.memo(() => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Controles de Paginação (1–5, 6–10...) no Modo Telão */}
+          {totalPages > 1 && !isExpandedView && (
+            <div className="bg-[#FAF5FF] px-2 py-1 rounded-2xl border border-[#DDC7F8] flex items-center gap-1 text-xs text-[#6E4F7D]">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                disabled={safePage === 0}
+                title="Página anterior"
+                className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-semibold whitespace-nowrap px-1">
+                {startIdx + 1}–{Math.min(totalEntries, startIdx + PAGE_SIZE)}{' '}
+                <span className="text-[#9747FF]">de {totalEntries}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={safePage >= totalPages - 1}
+                title="Próxima página"
+                className="p-1 rounded-lg hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Botão de Alternar entre Modo Telão (1-5) e Modo Expandido (Até 50) */}
+          {totalEntries > 5 && (
+            <button
+              type="button"
+              onClick={() => setIsExpandedView((v) => !v)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                isExpandedView
+                  ? 'bg-[#330043] text-white border-[#330043] shadow-xs'
+                  : 'bg-white text-[#6E4F7D] hover:text-[#330043] border-[#DDC7F8]'
+              }`}
+              title={isExpandedView ? 'Voltar para modo automático' : 'Expandir lista completa com rolagem'}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>{isExpandedView ? 'Modo Telão (1–5)' : `Ver Todos (${Math.min(50, totalEntries)})`}</span>
+            </button>
+          )}
+
           <div className="bg-[#F5F0FF] p-1 rounded-2xl border border-[#DDC7F8] inline-flex items-center gap-1">
             {(
               [
@@ -128,7 +200,13 @@ export const TVRankingCard: React.FC = React.memo(() => {
       </div>
 
       {/* Linhas do Ranking (Sem AnimatePresence mode="wait" para NUNCA piscar a tela) */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col justify-center">
+      <div
+        className={`flex-1 min-h-0 ${
+          isExpandedView
+            ? 'overflow-y-auto pr-1 space-y-1.5'
+            : 'overflow-hidden flex flex-col justify-center'
+        }`}
+      >
         {isInitialLoading ? (
           <div className="space-y-1.5">
             {[1, 2, 3, 4, 5].map((n) => (
@@ -173,7 +251,7 @@ export const TVRankingCard: React.FC = React.memo(() => {
         ) : (
           <div className="space-y-1.5">
             {visibleLeaderboard.map((entry, idx) => {
-              const pos = idx + 1;
+              const pos = entry.rank;
               const tier = getPlayerPowerTier({
                 highScore: entry.highScore,
                 totalScore: entry.totalScore,
@@ -296,6 +374,19 @@ export const TVRankingCard: React.FC = React.memo(() => {
                 </motion.div>
               );
             })}
+
+            {/* Botão de Exibir Mais Participantes ao rolar no modo expandido */}
+            {isExpandedView && totalEntries > displayLimit && (
+              <div className="pt-2 pb-1 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setDisplayLimit((prev) => prev + 25)}
+                  className="px-4 py-1.5 rounded-full bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#DDC7F8] text-xs font-bold text-[#9747FF] transition-colors cursor-pointer"
+                >
+                  Exibir mais participantes (+25)
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
