@@ -271,6 +271,7 @@ export class GameEngine {
       nickname: profile.nickname,
       avatar: profile.avatar,
       highScore: profile.highScore,
+      totalScore: profile.totalScore || 0,
       matchesPlayed: profile.matchesPlayed,
       winsCount: profile.winsCount,
       isBot: false,
@@ -425,6 +426,7 @@ export class GameEngine {
           nickname: template.nickname,
           avatar: template.avatar,
           highScore: balancedHighScore,
+          totalScore: balancedHighScore * Math.max(1, balancedMatches),
           matchesPlayed: balancedMatches,
           winsCount: 0,
           isBot: true,
@@ -518,7 +520,7 @@ export class GameEngine {
         if (roomPlayer && !roomPlayer.isBot) {
           const prevTier = getPlayerPowerTier({
             highScore: roomPlayer.highScore,
-            totalScore: roomPlayer.highScore * Math.max(1, roomPlayer.matchesPlayed),
+            totalScore: roomPlayer.totalScore,
             winsCount: roomPlayer.winsCount,
             matchesPlayed: roomPlayer.matchesPlayed,
           });
@@ -563,6 +565,7 @@ export class GameEngine {
 
           if (updatedProfile) {
             roomPlayer.highScore = updatedProfile.highScore;
+            roomPlayer.totalScore = updatedProfile.totalScore;
             roomPlayer.matchesPlayed = updatedProfile.matchesPlayed;
             roomPlayer.winsCount = updatedProfile.winsCount;
           }

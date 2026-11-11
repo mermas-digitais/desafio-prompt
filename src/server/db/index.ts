@@ -6,6 +6,10 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { desc, eq, sql } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { OFFICIAL_CHALLENGES, type ChallengeSeedData } from './challengesData.js';
+import {
+  calculatePlayerPowerScore,
+  getPlayerPowerTier,
+} from '../../shared/achievements.js';
 import type {
   AvatarId,
   LeaderboardEntry,
@@ -684,23 +688,41 @@ class AppDatabase {
     const activePlayers = rawPlayers.filter((p) => p.matchesPlayed > 0 || p.highScore > 0);
 
     const toEntries = (list: typeof activePlayers): LeaderboardEntry[] =>
-      list.slice(0, limit).map((p, idx) => ({
-        rank: idx + 1,
-        playerId: p.id,
-        nickname: p.nickname,
-        avatar: p.avatar,
-        highScore: p.highScore,
-        winsCount: p.winsCount,
-        matchesPlayed: p.matchesPlayed,
-        totalScore: p.totalScore,
-        updatedAt: p.updatedAt,
-      }));
+      list.slice(0, limit).map((p, idx) => {
+        const powerScore = calculatePlayerPowerScore({
+          highScore: p.highScore,
+          totalScore: p.totalScore,
+          winsCount: p.winsCount,
+          matchesPlayed: p.matchesPlayed,
+        });
+        const tier = getPlayerPowerTier({
+          highScore: p.highScore,
+          totalScore: p.totalScore,
+          winsCount: p.winsCount,
+          matchesPlayed: p.matchesPlayed,
+        });
+        return {
+          rank: idx + 1,
+          playerId: p.id,
+          nickname: p.nickname,
+          avatar: p.avatar,
+          highScore: p.highScore,
+          winsCount: p.winsCount,
+          matchesPlayed: p.matchesPlayed,
+          totalScore: p.totalScore,
+          powerScore,
+          powerLevel: tier.level,
+          powerTitle: tier.shortTitle,
+          updatedAt: p.updatedAt,
+        };
+      });
 
-    // 1. General: highScore + (winsCount * 150) + (matchesPlayed * 20)
+    // 1. General (Ranking de Poder / PWR): amontoado acumulado de pontos + vitórias + partidas
     const generalSorted = [...activePlayers].sort((a, b) => {
-      const scoreA = a.highScore + a.winsCount * 150 + a.matchesPlayed * 20;
-      const scoreB = b.highScore + b.winsCount * 150 + b.matchesPlayed * 20;
-      if (scoreB !== scoreA) return scoreB - scoreA;
+      const pwrA = calculatePlayerPowerScore(a);
+      const pwrB = calculatePlayerPowerScore(b);
+      if (pwrB !== pwrA) return pwrB - pwrA;
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
       return b.highScore - a.highScore;
     });
 

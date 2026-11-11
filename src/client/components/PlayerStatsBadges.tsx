@@ -16,6 +16,7 @@ interface PlayerStatsBadgesProps {
   className?: string;
   showLabels?: boolean;
   showTitleBadge?: boolean;
+  showPowerScore?: boolean;
   showCareerAchievements?: boolean;
 }
 
@@ -28,6 +29,7 @@ export const PlayerStatsBadges: React.FC<PlayerStatsBadgesProps> = React.memo(
     size = 'sm',
     className = '',
     showTitleBadge = true,
+    showPowerScore = false,
     showCareerAchievements = false,
   }) => {
     const powerTier = getPlayerPowerTier({
@@ -66,6 +68,16 @@ export const PlayerStatsBadges: React.FC<PlayerStatsBadgesProps> = React.memo(
           >
             <BadgeVectorIcon iconKey={powerTier.icon} className="w-3 h-3 shrink-0" />
             <span>{powerTier.shortTitle}</span>
+          </div>
+        )}
+
+        {showPowerScore && (
+          <div
+            className={`whitespace-nowrap shrink-0 inline-flex items-center leading-none font-quicksand font-bold bg-[#FAF0FF] border border-[#9747FF]/30 text-[#4C1D95] ${sizeStyles}`}
+            title={`Poder Acumulado: ${powerTier.powerScore} PWR`}
+          >
+            <Zap className={`${iconSize} text-[#9747FF] fill-[#9747FF]`} />
+            <span>{powerTier.powerScore} PWR</span>
           </div>
         )}
 

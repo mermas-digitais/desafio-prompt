@@ -465,6 +465,14 @@ export const AdminScreen: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-2.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-purple-50 border border-purple-200 text-[#4C1D95] font-display text-sm font-bold"
+                            title={`Poder Acumulado: ${tier.powerScore} PWR`}
+                          >
+                            <Zap className="w-3.5 h-3.5 text-[#9747FF] fill-[#9747FF]" />
+                            <span>{tier.powerScore} PWR</span>
+                          </span>
+
                           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-display text-sm">
                             <Zap className="w-3.5 h-3.5 text-amber-500" />
                             <span>{player.highScore} pts</span>

@@ -46,6 +46,7 @@ export interface RoomPlayer {
   nickname: string;
   avatar: AvatarId;
   highScore: number;
+  totalScore: number;
   matchesPlayed: number;
   winsCount: number;
   isBot: boolean;
@@ -119,13 +120,16 @@ export interface LeaderboardEntry {
   winsCount: number;
   matchesPlayed: number;
   totalScore: number;
+  powerScore?: number;
+  powerLevel?: number;
+  powerTitle?: string;
   updatedAt: string;
 }
 
 export interface LeaderboardsPayload {
-  general: LeaderboardEntry[]; // Ordenado por índice combinado (HighScore + Vitórias * 250)
-  points: LeaderboardEntry[];  // Ordenado por HighScore puro
-  wins: LeaderboardEntry[];    // Ordenado por Vitórias (winsCount) e desempate por HighScore
+  general: LeaderboardEntry[]; // Ranking de Poder (PWR Acumulado na carreira: amontoado de pontos + vitórias)
+  points: LeaderboardEntry[];  // Ranking por Recorde (HighScore em uma única rodada)
+  wins: LeaderboardEntry[];    // Ranking por Vitórias (winsCount) e desempate por HighScore
   stats: {
     totalPlayers: number;
     totalMatches: number;

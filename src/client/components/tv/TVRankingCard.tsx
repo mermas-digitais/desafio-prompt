@@ -133,9 +133,9 @@ export const TVRankingCard: React.FC = React.memo(() => {
           <div className="bg-[#F5F0FF] p-1 rounded-2xl border border-[#DDC7F8] inline-flex items-center gap-1">
             {(
               [
-                { id: 'general', label: 'Geral', Icon: Trophy },
-                { id: 'points', label: 'Só Pontos', Icon: Zap },
-                { id: 'wins', label: 'Só Vitórias', Icon: Crown },
+                { id: 'general', label: 'Poder (PWR)', Icon: Zap },
+                { id: 'points', label: 'Recorde', Icon: Trophy },
+                { id: 'wins', label: 'Vitórias', Icon: Crown },
               ] as const
             ).map(({ id, label, Icon }) => {
               const isActive = activeTab === id;
@@ -316,16 +316,30 @@ export const TVRankingCard: React.FC = React.memo(() => {
 
                   {/* Bloco Direito: Estatísticas de Pontos, Vitórias e Partidas */}
                   <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-                    <span
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-display text-xs lg:text-sm whitespace-nowrap"
-                      title="Maior Pontuação"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 shrink-0" />
-                      <span>{entry.highScore} pts</span>
-                    </span>
+                    {activeTab === 'general' ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-[#FAF0FF] to-[#F5E6FF] border border-[#9747FF]/40 text-[#4C1D95] font-display text-xs lg:text-sm font-bold shadow-2xs whitespace-nowrap"
+                        title={`Poder Acumulado: ${entry.powerScore ?? tier.powerScore} PWR (${entry.totalScore} pts acumulados)`}
+                      >
+                        <Zap className="w-3.5 h-3.5 text-[#9747FF] fill-[#9747FF] shrink-0" />
+                        <span>{entry.powerScore ?? tier.powerScore} PWR</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-display text-xs lg:text-sm whitespace-nowrap"
+                        title="Maior Pontuação da Rodada"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 shrink-0" />
+                        <span>{entry.highScore} pts</span>
+                      </span>
+                    )}
 
                     <span
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-pink-50 border border-pink-200 text-[#D01F6B] font-display text-xs lg:text-sm whitespace-nowrap"
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-xl border font-display text-xs lg:text-sm whitespace-nowrap ${
+                        activeTab === 'wins'
+                          ? 'bg-gradient-to-r from-pink-100 to-rose-100 border-[#FF4A97] text-[#D01F6B] font-bold shadow-2xs'
+                          : 'bg-pink-50 border-pink-200 text-[#D01F6B]'
+                      }`}
                       title="Vitórias"
                     >
                       <Crown className="w-3.5 h-3.5 text-[#FF4A97] fill-[#FF4A97]/20 shrink-0" />
@@ -391,13 +405,16 @@ export const TVRankingCard: React.FC = React.memo(() => {
             <Minus className="w-3 h-3 stroke-[2.5] text-slate-400" /> Manteve
           </span>
           <span className="text-[#DDC7F8]">•</span>
+          <span className="inline-flex items-center gap-1 text-[#4C1D95]">
+            <Zap className="w-3.5 h-3.5 text-[#9747FF] fill-[#9747FF]" /> Poder (PWR)
+          </span>
           <span className="inline-flex items-center gap-1 text-amber-800">
-            <Zap className="w-3.5 h-3.5 text-amber-500" /> Pontos
+            <Trophy className="w-3.5 h-3.5 text-amber-500" /> Recorde
           </span>
           <span className="inline-flex items-center gap-1 text-[#D01F6B]">
             <Crown className="w-3.5 h-3.5 text-[#FF4A97]" /> Vitórias
           </span>
-          <span className="inline-flex items-center gap-1 text-[#4C1D95]">
+          <span className="inline-flex items-center gap-1 text-[#6E4F7D]">
             <Gamepad2 className="w-3.5 h-3.5 text-[#9747FF]" /> Partidas
           </span>
         </div>

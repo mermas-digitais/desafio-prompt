@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Crown, Gamepad2, Sparkles, X, Zap } from 'lucide-react';
+import { Crown, Gamepad2, Sparkles, Trophy, X, Zap } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { usePlayerSessionStore } from '../../store/usePlayerSessionStore';
 import { resolveChallengeImageUrl } from '../../helpers/imageHelpers';
@@ -90,8 +90,8 @@ export const PlayRankingModal: React.FC = React.memo(() => {
             <div className="grid grid-cols-3 gap-2 my-3">
               {(
                 [
-                  { id: 'general', label: 'Geral', icon: <Sparkles className="w-3.5 h-3.5" /> },
-                  { id: 'points', label: 'Pontos', icon: <Zap className="w-3.5 h-3.5" /> },
+                  { id: 'general', label: 'Poder (PWR)', icon: <Zap className="w-3.5 h-3.5" /> },
+                  { id: 'points', label: 'Recorde', icon: <Trophy className="w-3.5 h-3.5" /> },
                   { id: 'wins', label: 'Vitórias', icon: <Crown className="w-3.5 h-3.5" /> },
                 ] as const
               ).map((t) => (
@@ -163,6 +163,17 @@ export const PlayRankingModal: React.FC = React.memo(() => {
                           <div className="font-quicksand font-bold text-sm text-[#330043] truncate max-w-full mt-0.5">
                             {entry.nickname} {isMe && <span className="text-[#FF4A97]">(Você)</span>}
                           </div>
+                          {mobileRankingTab === 'general' ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-[#FAF0FF] to-[#F5E6FF] border border-[#9747FF]/40 text-[#4C1D95] font-quicksand font-bold text-xs shadow-2xs">
+                                <Zap className="w-3 h-3 text-[#9747FF] fill-[#9747FF]" />
+                                {entry.powerScore ?? entryTier.powerScore} PWR
+                              </span>
+                              <span className="text-[10px] text-[#6E4F7D] font-medium">
+                                ({entry.totalScore} pts acum. • {entry.matchesPlayed} {entry.matchesPlayed === 1 ? 'partida' : 'partidas'})
+                              </span>
+                            </div>
+                          ) : null}
                           {unlockedAchievements.length > 0 && (
                             <div className="w-full mt-1">
                               <AchievementMarqueeStrip
@@ -191,7 +202,12 @@ export const PlayRankingModal: React.FC = React.memo(() => {
 
               {entries.length > 0 && (
                 <div className="pt-2 text-center text-[11px] font-semibold text-[#6E4F7D]">
-                  Exibindo {entries.length} {entries.length === 1 ? 'jogadora' : 'jogadoras'} no Ranking Geral
+                  Exibindo {entries.length} {entries.length === 1 ? 'jogadora' : 'jogadoras'} no Ranking{' '}
+                  {mobileRankingTab === 'general'
+                    ? 'por Poder (PWR)'
+                    : mobileRankingTab === 'points'
+                    ? 'por Recorde'
+                    : 'por Vitórias'}
                 </div>
               )}
             </div>

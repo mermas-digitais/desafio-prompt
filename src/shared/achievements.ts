@@ -214,7 +214,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 2,
-    minPower: 300,
+    minPower: 700,
     title: 'Exploradora IA',
     shortTitle: 'Exploradora IA',
     icon: 'sparkles',
@@ -224,7 +224,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 3,
-    minPower: 750,
+    minPower: 1800,
     title: 'Aprendiz de Prompt',
     shortTitle: 'Aprendiz de Prompt',
     icon: 'compass',
@@ -234,7 +234,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 4,
-    minPower: 1300,
+    minPower: 3500,
     title: 'Engenheira Criativa',
     shortTitle: 'Engenheira Criativa',
     icon: 'zap',
@@ -244,7 +244,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 5,
-    minPower: 2000,
+    minPower: 6000,
     title: 'Diretora de Visão',
     shortTitle: 'Diretora de Visão',
     icon: 'palette',
@@ -254,7 +254,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 6,
-    minPower: 2850,
+    minPower: 9500,
     title: 'Arquiteta Neural',
     shortTitle: 'Arquiteta Neural',
     icon: 'cpu',
@@ -264,7 +264,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 7,
-    minPower: 3900,
+    minPower: 14000,
     title: 'Mestra da Síntese IA',
     shortTitle: 'Mestra da Síntese',
     icon: 'flame',
@@ -274,7 +274,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 8,
-    minPower: 5200,
+    minPower: 20000,
     title: 'Oráculo STEAM',
     shortTitle: 'Oráculo STEAM',
     icon: 'crown',
@@ -284,7 +284,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 9,
-    minPower: 6800,
+    minPower: 27500,
     title: 'Guardiã da Singularidade',
     shortTitle: 'Singularidade IA',
     icon: 'star',
@@ -294,7 +294,7 @@ export const POWER_TIERS: TierSpec[] = [
   },
   {
     level: 10,
-    minPower: 8800,
+    minPower: 36000,
     title: 'Lenda Mermã Digital',
     shortTitle: 'Lenda Mermã Digital',
     icon: 'gem',
@@ -304,20 +304,37 @@ export const POWER_TIERS: TierSpec[] = [
   },
 ];
 
+/**
+ * Calcula a pontuação acumulada de Poder (PWR) de uma jogadora.
+ * O PWR representa o amontoado acumulado de pontos obtidos em todas as partidas,
+ * recompensando a assiduidade e consistência, somado a bônus por vitórias (+100 PWR)
+ * e partidas completadas (+25 PWR).
+ */
+export function calculatePlayerPowerScore(stats: {
+  highScore?: number;
+  totalScore?: number;
+  winsCount?: number;
+  matchesPlayed?: number;
+}): number {
+  const highScore = stats.highScore || 0;
+  const matchesPlayed = stats.matchesPlayed || 0;
+  // Se totalScore não estiver disponível ou for 0 em contas antigas, projeta pelo highScore e partidas
+  const totalScore =
+    typeof stats.totalScore === 'number' && stats.totalScore > 0
+      ? stats.totalScore
+      : highScore * Math.max(1, matchesPlayed);
+  const winsCount = stats.winsCount || 0;
+
+  return Math.round(totalScore + winsCount * 100 + matchesPlayed * 25);
+}
+
 export function getPlayerPowerTier(stats: {
   highScore?: number;
   totalScore?: number;
   winsCount?: number;
   matchesPlayed?: number;
 }): PlayerPowerTierInfo {
-  const highScore = stats.highScore || 0;
-  const totalScore = stats.totalScore || highScore;
-  const winsCount = stats.winsCount || 0;
-  const matchesPlayed = stats.matchesPlayed || 0;
-
-  const powerScore = Math.round(
-    highScore * 1.35 + totalScore * 0.45 + winsCount * 420 + matchesPlayed * 110
-  );
+  const powerScore = calculatePlayerPowerScore(stats);
 
   let currentTier = POWER_TIERS[0];
   let nextTier: TierSpec | null = POWER_TIERS[1];
