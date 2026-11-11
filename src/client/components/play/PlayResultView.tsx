@@ -30,11 +30,13 @@ export interface PlayResultViewProps {
   myPowerTier: PlayerPowerTierInfo;
   onOpenRanking: () => void;
   onOpenShareCard?: () => void;
+  fullPrompt?: string;
 }
 
 export const PlayResultView: React.FC<PlayResultViewProps> = React.memo(
-  ({ myEvaluation, myPowerTier, onOpenRanking, onOpenShareCard }) => {
-    const fullPrompt = useGameStore((s) => s.roomState.challenge?.fullPrompt);
+  ({ myEvaluation, myPowerTier, onOpenRanking, onOpenShareCard, fullPrompt: customFullPrompt }) => {
+    const storePrompt = useGameStore((s) => s.roomState.challenge?.fullPrompt);
+    const fullPrompt = customFullPrompt ?? storePrompt;
 
     return (
       <motion.div

@@ -603,10 +603,10 @@ export class GameEngine {
       this.evaluations = evaluations;
       this.leaderboards = await database.getLeaderboards();
 
-      // Entra na fase REVEALING (1 por 1, 10 segundos cada para animação dramática)
+      // Entra na fase REVEALING (1 por 1, ritmo ágil: 4s por participante para manter dinamismo na TV)
       this.phase = 'REVEALING';
       this.currentRevealIndex = 0;
-      this.revealStepTimer = 10;
+      this.revealStepTimer = 4;
       this.broadcastState();
     } catch (err) {
       console.error('❌ [GameEngine] Falha durante avaliação da rodada:', err);
@@ -625,7 +625,7 @@ export class GameEngine {
     this.players = [];
     this.evaluations = [];
     this.currentRevealIndex = 0;
-    this.revealStepTimer = 8;
+    this.revealStepTimer = 4;
     this.podiumTimeLeft = 10;
     this.botSchedules = [];
     this.isEvaluating = false;
@@ -732,7 +732,7 @@ export class GameEngine {
           const maxIndex = Math.max(0, this.evaluations.length - 1);
           if (this.currentRevealIndex < maxIndex) {
             this.currentRevealIndex += 1;
-            this.revealStepTimer = 10;
+            this.revealStepTimer = 4;
           } else {
             this.phase = 'PODIUM';
             this.podiumTimeLeft = 10;

@@ -460,6 +460,6 @@ export async function evaluateRoundPrompts(
     rawEvaluations[0].isWinner = true;
   }
 
-  // Ordena por slot (1, 2, 3) para o reveal 1 por 1 seguir a ordem dos jogadores ou ordena conforme o jogo
-  return rawEvaluations.sort((a, b) => a.slot - b.slot);
+  // Ordena da menor pontuação para a maior pontuação (cria clímax dramático na TV: último colocado primeiro, vencedor por último)
+  return rawEvaluations.sort((a, b) => a.totalScore - b.totalScore);
 }
