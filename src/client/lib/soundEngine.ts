@@ -28,6 +28,7 @@ class StudioMusicalSoundEngine {
   private lastTypingNoteIdx: number = -1;
   private lastScoreTickAt: number = 0;
   private scoreArpeggioStep: number = 0;
+  private lastConfettiTime: number = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -354,41 +355,109 @@ class StudioMusicalSoundEngine {
     });
   }
 
-  /** Disparo de canvas-confetti nas cores oficiais Mermãs Digitais */
+  /** Disparo de canvas-confetti leve nas cores oficiais Mermãs Digitais (máx 2-3 camadas rápidas sem travar mobile) */
   public fireCelebrationConfetti(intensity: 'normal' | 'high' = 'normal') {
     if (typeof window === 'undefined') return;
+    const now = Date.now();
+    // Throttle estrito de 3.5 segundos para evitar empilhamento de efeitos acumulados
+    if (now - this.lastConfettiTime < 3500) return;
+    this.lastConfettiTime = now;
+
     const colors = ['#9747FF', '#FF4A97', '#FFD500', '#330043'];
+    const isMobile =
+      window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
     try {
-      if (intensity === 'normal') {
+      if (isMobile) {
+        // No mobile: 2 ou 3 camadas leves e rápidas (ticks baixos para sumir rápido e não tampar a tela)
+        // Camada 1: Lado esquerdo
         confetti({
-          particleCount: 55,
-          spread: 65,
-          origin: { x: 0.5, y: 0.65 },
+          particleCount: 22,
+          spread: 55,
+          origin: { x: 0.3, y: 0.6 },
           colors,
+          ticks: 90,
+          gravity: 1.35,
+          disableForReducedMotion: true,
         });
+
+        // Camada 2: Lado direito
+        setTimeout(() => {
+          confetti({
+            particleCount: 22,
+            spread: 55,
+            origin: { x: 0.7, y: 0.6 },
+            colors,
+            ticks: 90,
+            gravity: 1.35,
+            disableForReducedMotion: true,
+          });
+        }, 160);
+
+        // Camada 3 (apenas em alta celebração): Centro suave
+        if (intensity === 'high') {
+          setTimeout(() => {
+            confetti({
+              particleCount: 26,
+              spread: 65,
+              origin: { x: 0.5, y: 0.52 },
+              colors,
+              ticks: 90,
+              gravity: 1.35,
+              disableForReducedMotion: true,
+            });
+          }, 320);
+        }
+
+        // Limpeza garantida após as 3 camadas caírem (libera GPU/canvas)
+        setTimeout(() => {
+          try {
+            confetti.reset();
+          } catch {}
+        }, 2200);
       } else {
+        // Desktop / Telão TV: 2 a 3 camadas moderadas e limpas
         confetti({
-          particleCount: 90,
-          spread: 75,
-          origin: { x: 0.2, y: 0.6 },
+          particleCount: 45,
+          spread: 65,
+          origin: { x: 0.35, y: 0.65 },
           colors,
+          ticks: 110,
+          gravity: 1.15,
+          disableForReducedMotion: true,
         });
+
         setTimeout(() => {
           confetti({
-            particleCount: 90,
-            spread: 75,
-            origin: { x: 0.8, y: 0.6 },
+            particleCount: 45,
+            spread: 65,
+            origin: { x: 0.65, y: 0.65 },
             colors,
+            ticks: 110,
+            gravity: 1.15,
+            disableForReducedMotion: true,
           });
-        }, 220);
+        }, 180);
+
+        if (intensity === 'high') {
+          setTimeout(() => {
+            confetti({
+              particleCount: 60,
+              spread: 85,
+              origin: { x: 0.5, y: 0.5 },
+              colors,
+              ticks: 120,
+              gravity: 1.15,
+              disableForReducedMotion: true,
+            });
+          }, 360);
+        }
+
         setTimeout(() => {
-          confetti({
-            particleCount: 120,
-            spread: 110,
-            origin: { x: 0.5, y: 0.45 },
-            colors,
-          });
-        }, 480);
+          try {
+            confetti.reset();
+          } catch {}
+        }, 2600);
       }
     } catch {
       // Ignore confetti errors in headless environments

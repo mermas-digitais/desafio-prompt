@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, RectangleVertical, Share2, Sparkles, Square, X } from 'lucide-react';
+import { InstagramLogoIcon } from '../InstagramLogoIcon';
 import {
   SHARE_CARD_THEMES,
   buildShareText,
@@ -67,11 +68,11 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
     try {
       const outcome = await shareToInstagramStories(canvasRef.current, data);
       if (outcome === 'shared_native') {
-        setFeedback('Selecione "Stories" ou "Feed" no Instagram! ✨');
+        setFeedback('Selecione "Instagram" > "Stories" no menu de compartilhamento! ✨');
       } else if (outcome === 'opened_instagram_app') {
-        setFeedback('📸 Imagem salva! Abrindo Instagram Stories...');
+        setFeedback('📸 Card salvo na galeria! No Instagram, selecione no canto inferior esquerdo.');
       } else {
-        setFeedback('Card salvo nos seus downloads! Poste nos Stories 💜');
+        setFeedback('Card salvo na galeria! Abra o Instagram e selecione nos Stories 💜');
       }
     } finally {
       setIsSharing(false);
@@ -248,21 +249,26 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
                 type="button"
                 onClick={handleInstagramShare}
                 disabled={isRendering || isSharing}
-                className="w-full bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#FCAF45] py-3.5 px-4 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(253,29,29,0.25)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60 transition-transform active:scale-[0.98]"
+                className="w-full bg-gradient-to-tr from-[#f09433] via-[#dc2743] via-[#cc2366] to-[#bc1888] py-3.5 px-4 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(220,39,67,0.3)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60 transition-transform active:scale-[0.98]"
               >
                 {isSharing ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <svg
-                    className="w-4 h-4 fill-white"
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-                  </svg>
+                  <InstagramLogoIcon className="w-5 h-5 text-white" />
                 )}
                 <span>Postar no Instagram Stories</span>
               </button>
+
+              {/* Dica de como selecionar o card no Instagram */}
+              <div className="p-3 rounded-2xl bg-[#FBF7FF] border border-[#E9D8FD] flex items-start gap-2.5 text-left text-xs font-quicksand">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-[#f09433] via-[#dc2743] via-[#cc2366] to-[#bc1888] flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                  <InstagramLogoIcon className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div className="text-[#330043] leading-relaxed text-[11px]">
+                  <strong className="block text-[#9747FF] font-display text-xs mb-0.5">Como postar nos Stories:</strong>
+                  <span>Selecione <strong>Instagram &gt; Stories</strong> na lista. Se abrir direto na câmera, seu card já foi salvo na galeria: basta <strong>deslizar para cima ⬆️</strong> ou tocar na <strong>miniatura da foto</strong> no canto inferior esquerdo!</span>
+                </div>
+              </div>
 
               {/* Botão Secundário: Compartilhar no WhatsApp / Outros */}
               <div className="grid grid-cols-2 gap-2">

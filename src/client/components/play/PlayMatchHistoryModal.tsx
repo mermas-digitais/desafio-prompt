@@ -1,6 +1,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, Camera, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Sparkles, X } from 'lucide-react';
+import { InstagramLogoIcon } from '../InstagramLogoIcon';
 import { PlayMobilePodium } from './PlayMobilePodium';
 import { PlayResultView } from './PlayResultView';
 import { PlayRoomRoundRanking } from './PlayRoomRoundRanking';
@@ -82,11 +83,11 @@ export const PlayMatchHistoryModal: React.FC<PlayMatchHistoryModalProps> = ({
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => onOpenShareCard(match.shareData)}
-              className="w-full flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#FCB045] text-white shadow-[0_10px_28px_rgba(253,29,29,0.32)] border-2 border-white/40 cursor-pointer"
+              className="w-full flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-tr from-[#f09433] via-[#dc2743] via-[#cc2366] to-[#bc1888] text-white shadow-[0_10px_28px_rgba(220,39,67,0.35)] border-2 border-white/40 cursor-pointer"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/30 shadow-inner">
-                  <Camera className="w-5 h-5 text-white" />
+                  <InstagramLogoIcon className="w-5 h-5 text-white" />
                 </div>
                 <div className="text-left min-w-0">
                   <div className="text-[10px] font-quicksand font-extrabold uppercase tracking-wider text-white/90 flex items-center gap-1">
@@ -101,7 +102,7 @@ export const PlayMatchHistoryModal: React.FC<PlayMatchHistoryModalProps> = ({
                   </div>
                 </div>
               </div>
-              <span className="px-3.5 py-1.5 rounded-xl bg-white text-[#9747FF] font-display text-xs font-bold shrink-0 shadow-md">
+              <span className="px-3.5 py-1.5 rounded-xl bg-white text-[#dc2743] font-display text-xs font-bold shrink-0 shadow-md">
                 Abrir
               </span>
             </motion.button>

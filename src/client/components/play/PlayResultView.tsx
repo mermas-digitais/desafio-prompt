@@ -9,11 +9,11 @@ import {
   Globe,
   MessageSquareHeart,
   Palette,
-  Share2,
   Target,
   Trophy,
   Zap,
 } from 'lucide-react';
+import { InstagramLogoIcon } from '../InstagramLogoIcon';
 import { useGameStore } from '../../store/useGameStore';
 import { AvatarBadge } from '../AvatarBadge';
 import { BadgeVectorIcon } from '../BadgeVectorIcon';
@@ -263,10 +263,10 @@ export const PlayResultView: React.FC<PlayResultViewProps> = React.memo(
                 <button
                   type="button"
                   onClick={onOpenShareCard}
-                  className="w-full bg-gradient-to-r from-[#FF4A97] via-[#9747FF] to-[#FFCD34] py-3.5 px-5 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(151,71,255,0.25)] flex items-center justify-center gap-2 cursor-pointer hover:opacity-95 transition-all active:scale-[0.98]"
+                  className="w-full bg-gradient-to-tr from-[#f09433] via-[#dc2743] via-[#cc2366] to-[#bc1888] py-3.5 px-5 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(220,39,67,0.28)] flex items-center justify-center gap-2.5 cursor-pointer hover:opacity-95 transition-all active:scale-[0.98]"
                 >
-                  <Share2 className="w-4 h-4 text-white" />
-                  <span>Criar Card para Redes Sociais</span>
+                  <InstagramLogoIcon className="w-4 h-4 text-white" />
+                  <span>Postar Conquista no Instagram Stories</span>
                 </button>
               )}
 

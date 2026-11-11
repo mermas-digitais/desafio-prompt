@@ -160,10 +160,9 @@ export function useTVSoundChoreography() {
       playAiThinkingSound();
     }
 
-    // Pódio final
+    // Pódio final (playVictoryFanfare já dispara a celebração musical e visual controlada)
     if (currentPhase === 'PODIUM' && prevPhase !== 'PODIUM') {
       playVictoryFanfare();
-      fireCelebrationConfetti('high');
     }
 
     prevPhaseRef.current = currentPhase;

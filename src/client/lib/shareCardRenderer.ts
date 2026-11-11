@@ -886,10 +886,10 @@ export function downloadBlob(blob: Blob, fileName: string): boolean {
 
 /**
  * Fluxo de Compartilhamento Direto para o Instagram Stories:
- * 1. Tenta acionar a Web Share API nativa com o arquivo PNG (no iOS e Android, o Instagram aparece direto no menu de opções).
- * 2. Faz o download do arquivo de imagem para a galeria do celular.
+ * 1. Faz o download de segurança da imagem PNG para a galeria do celular.
+ * 2. Tenta acionar a Web Share API nativa com APENAS o arquivo PNG (sem texto, pois texto faz o Instagram omitir a opção Stories).
  * 3. Copia a legenda oficial para a área de transferência.
- * 4. Aciona o deep link `instagram://story-camera` para abrir o Instagram direto no modo Stories!
+ * 4. Caso o Web Share nativo não esteja disponível, aciona o deep link `instagram://story-camera`.
  */
 export async function shareToInstagramStories(
   canvas: HTMLCanvasElement,
@@ -902,7 +902,18 @@ export async function shareToInstagramStories(
   const fileName = `mdx26-desafio-prompt-${safeNick}-story.png`;
   const file = new File([blob], fileName, { type: 'image/png' });
 
-  // 1. Tenta compartilhamento nativo do SO primeiro (iOS Safari e Android Chrome exibem Instagram Stories)
+  // 1. Sempre salva cópia imediata na galeria para o caso do app abrir na câmera
+  downloadBlob(blob, fileName);
+
+  try {
+    await navigator.clipboard?.writeText(buildShareText(data));
+  } catch {
+    // Clipboard opcional
+  }
+
+  // 2. Tenta compartilhamento nativo do SO APENAS COM O ARQUIVO
+  // CRÍTICO: Não passar 'text' ou 'title' aqui, pois o handler de Stories do Instagram no iOS/Android
+  // descarta Stories se houver payload de texto, forçando Feed ou Direct!
   const nav = navigator as Navigator & {
     canShare?: (data: ShareData) => boolean;
   };
@@ -910,8 +921,6 @@ export async function shareToInstagramStories(
     try {
       await nav.share({
         files: [file],
-        title: 'Desafio de Prompt • MDX26',
-        text: buildShareText(data),
       });
       return 'shared_native';
     } catch (err) {
@@ -921,16 +930,7 @@ export async function shareToInstagramStories(
     }
   }
 
-  // 2. Se não abriu via Web Share: Salva na galeria e abre o app do Instagram no modo Stories
-  downloadBlob(blob, fileName);
-
-  try {
-    await navigator.clipboard?.writeText(buildShareText(data));
-  } catch {
-    // Clipboard opcional
-  }
-
-  // Deep Link para Instagram Story Camera
+  // 3. Fallback: Deep Link para Instagram Story Camera
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (isMobile) {
     window.location.href = 'instagram://story-camera';

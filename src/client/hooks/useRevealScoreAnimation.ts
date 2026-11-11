@@ -87,7 +87,6 @@ export function useRevealScoreAnimation(
         setAnimatedScore(target);
         if (currentEvaluation.isNewHighScore || target >= 750) {
           playRecordBreakerSound();
-          fireCelebrationConfetti('normal');
         }
         return;
       }
