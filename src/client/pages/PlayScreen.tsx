@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Share2, Trophy } from 'lucide-react';
+import { Camera, Share2, Sparkles, Trophy } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { usePlayerSessionStore } from '../store/usePlayerSessionStore';
 import { useMobilePlayerSession } from '../hooks/useMobilePlayerSession';
@@ -11,15 +11,18 @@ import { PlayLobbyCard } from '../components/play/PlayLobbyCard';
 import { PlayActiveRoundView } from '../components/play/PlayActiveRoundView';
 import { PlayResultView } from '../components/play/PlayResultView';
 import { PlayMobilePodium } from '../components/play/PlayMobilePodium';
+import { PlayRoomRoundRanking } from '../components/play/PlayRoomRoundRanking';
 import { PlayShareCardStudio } from '../components/play/PlayShareCardStudio';
 import { PlayImageZoomModal, PlayRankingModal } from '../components/play/PlayModals';
 import { getAvatarMeta, isCustomPhotoAvatar } from '../components/AvatarBadge';
-import type { ShareCardData } from '../lib/shareCardRenderer';
+import { ACHIEVEMENTS_CATALOG, type AchievementId } from '../../shared/achievements';
+import type { ShareCardAchievement, ShareCardData } from '../lib/shareCardRenderer';
 
 export const PlayScreen: React.FC = () => {
   const phase = useGameStore((s) => s.roomState.phase);
   const countdownLeft = useGameStore((s) => s.roomState.countdownLeft);
   const evaluations = useGameStore((s) => s.roomState.evaluations);
+  const currentRevealIndex = useGameStore((s) => s.roomState.currentRevealIndex);
   const challenge = useGameStore((s) => s.roomState.challenge);
   const setIsZoomOpen = usePlayerSessionStore((s) => s.setIsZoomOpen);
   const setIsRankingModalOpen = usePlayerSessionStore((s) => s.setIsRankingModalOpen);
@@ -53,18 +56,40 @@ export const PlayScreen: React.FC = () => {
     handleLockPrompt,
   } = useMobilePlayerSession();
 
-  // Captura um "snapshot" do resultado para o card compartilhável.
+  // Captura um "snapshot" enriquecido do resultado para o card compartilhável.
+  // Inclui as conquistas desbloqueadas, PWR total, ranking e visual da rodada.
   // Ele continua disponível mesmo depois que a sala volta para IDLE/LOBBY.
   useEffect(() => {
     if ((phase !== 'REVEALING' && phase !== 'PODIUM') || !myEvaluation) return;
     const sorted = [...evaluations].sort((a, b) => b.totalScore - a.totalScore);
     const rank = Math.max(1, sorted.findIndex((ev) => ev.playerId === myEvaluation.playerId) + 1);
     const avatar = myEvaluation.avatar;
+
+    // Conquistas ganhas nesta rodada ou catálogo de conquistas desbloqueadas
+    const roundAchIds: string[] =
+      myEvaluation.roundAchievements && myEvaluation.roundAchievements.length > 0
+        ? myEvaluation.roundAchievements
+        : myAchievements || [];
+
+    const activeAchList: ShareCardAchievement[] = roundAchIds
+      .map((id) => ACHIEVEMENTS_CATALOG[id as AchievementId])
+      .filter(Boolean)
+      .map((a) => ({
+        id: a.id,
+        title: a.title,
+        rarity: a.rarity,
+        powerBonus: a.powerBonus,
+      }));
+
+    const totalRoundPwr = activeAchList.reduce((acc, a) => acc + (a.powerBonus || 0), 0);
+    const totalPwr = totalRoundPwr > 0 ? totalRoundPwr : (myPowerTier?.powerScore || 0);
+
     setShareData({
       nickname: myEvaluation.nickname,
       avatarSrc: isCustomPhotoAvatar(avatar) ? String(avatar) : getAvatarMeta(avatar).src,
       tierTitle: myEvaluation.newTitle || myPowerTier.title,
       powerLevel: myEvaluation.newPowerLevel || myPowerTier.level,
+      totalPwr,
       rank,
       totalPlayers: evaluations.length,
       totalScore: myEvaluation.totalScore,
@@ -75,8 +100,9 @@ export const PlayScreen: React.FC = () => {
       isNewHighScore: myEvaluation.isNewHighScore,
       challengeTitle: challenge?.title || 'Arte gerada por IA',
       challengeImageUrl: challenge?.imageUrl || '',
+      achievements: activeAchList,
     });
-  }, [phase, myEvaluation, evaluations, challenge, myPowerTier.title, myPowerTier.level]);
+  }, [phase, myEvaluation, evaluations, challenge, myPowerTier, myAchievements]);
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-x-hidden pb-10">
@@ -117,13 +143,48 @@ export const PlayScreen: React.FC = () => {
                   Seu card da última partida
                 </span>
                 <span className="block font-quicksand text-[11px] text-[#6E4F7D] truncate">
-                  {shareData.rank}º lugar • {shareData.totalScore} pts — compartilhe nas redes
+                  {shareData.rank}º lugar • {shareData.totalScore} pts — compartilhe no Instagram Stories
                 </span>
               </span>
             </span>
             <span className="font-quicksand font-bold text-xs text-[#9747FF] shrink-0">Abrir</span>
           </button>
         )}
+
+        {/* 🌟 BOTÃO DE DESTAQUE NO TOPO: COMPARTILHAR CONQUISTA NO INSTAGRAM STORIES */}
+        {(phase === 'REVEALING' || phase === 'PODIUM') && myEvaluation && (
+          <motion.button
+            type="button"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setIsShareStudioOpen(true)}
+            className="w-full flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#FCB045] text-white shadow-[0_10px_28px_rgba(253,29,29,0.32)] border-2 border-white/40 cursor-pointer"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/30 shadow-inner">
+                <Camera className="w-5 h-5 text-white" />
+              </div>
+              <div className="text-left min-w-0">
+                <div className="text-[10px] font-quicksand font-extrabold uppercase tracking-wider text-white/90 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-yellow-200" />
+                  <span>Card Oficial MDX26</span>
+                </div>
+                <div className="font-display text-sm sm:text-base text-white leading-tight truncate">
+                  Postar no Instagram Stories
+                </div>
+                <div className="font-quicksand text-[11px] text-white/90 truncate">
+                  {myEvaluation.totalScore} pts • {shareData?.rank ? `${shareData.rank}º lugar na sala` : 'Resultado pronto'}
+                </div>
+              </div>
+            </div>
+            <span className="px-3.5 py-1.5 rounded-xl bg-white text-[#9747FF] font-display text-xs font-bold shrink-0 shadow-md">
+              Abrir
+            </span>
+          </motion.button>
+        )}
+
         {/* 1. ENTRADA / PERFIL */}
         {(!myRoomSlot || isEditingProfile) && phase !== 'REVEALING' && phase !== 'PODIUM' && (
           <PlayProfileCard
@@ -203,7 +264,7 @@ export const PlayScreen: React.FC = () => {
           </div>
         )}
 
-        {/* 6. PÓDIO NO CELULAR + RESULTADO INDIVIDUAL */}
+        {/* 6. PÓDIO NO CELULAR (QUANDO A TV MONTA O PÓDIO) */}
         {phase === 'PODIUM' && myEvaluation && evaluations.length > 0 && (
           <PlayMobilePodium
             evaluations={evaluations}
@@ -212,12 +273,23 @@ export const PlayScreen: React.FC = () => {
           />
         )}
 
+        {/* 7. RESULTADO INDIVIDUAL DA JOGADORA (NOTAS, CAMADAS, FEEDBACK E CONQUISTAS) */}
         {(phase === 'REVEALING' || phase === 'PODIUM') && (
           <PlayResultView
             myEvaluation={myEvaluation}
             myPowerTier={myPowerTier}
             onOpenRanking={() => setIsRankingModalOpen(true)}
             onOpenShareCard={() => setIsShareStudioOpen(true)}
+          />
+        )}
+
+        {/* 8. PONTUAÇÃO GERAL DA SALA: ACOMPANHA O TELÃO DA TV COM DESTAQUE DA VEZ */}
+        {(phase === 'REVEALING' || phase === 'PODIUM') && evaluations.length > 0 && (
+          <PlayRoomRoundRanking
+            evaluations={evaluations}
+            myPlayerId={myEvaluation?.playerId}
+            currentRevealIndex={currentRevealIndex}
+            phase={phase}
           />
         )}
       </main>

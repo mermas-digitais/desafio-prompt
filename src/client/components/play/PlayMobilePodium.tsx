@@ -32,7 +32,6 @@ export const PlayMobilePodium: React.FC<PlayMobilePodiumProps> = React.memo(
   ({ evaluations, myPlayerId, onOpenShareCard }) => {
     const sorted = [...evaluations].sort((a, b) => b.totalScore - a.totalScore);
     const top = sorted.slice(0, 3);
-    const rest = sorted.slice(3);
     const order =
       top.length === 3
         ? [
@@ -46,7 +45,7 @@ export const PlayMobilePodium: React.FC<PlayMobilePodiumProps> = React.memo(
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mermas-card p-4 flex flex-col gap-3 overflow-hidden"
+        className="mermas-card p-4 flex flex-col gap-3 overflow-hidden border-2 border-[#FFD500]/60 shadow-[0_8px_30px_rgba(255,176,32,0.15)]"
       >
         <div className="flex items-center justify-between">
           <div>
@@ -60,7 +59,7 @@ export const PlayMobilePodium: React.FC<PlayMobilePodiumProps> = React.memo(
           <img src="/marca/competicoes.svg" alt="" className="w-9 h-9 object-contain" />
         </div>
 
-        {/* Degraus */}
+        {/* Degraus do Pódio */}
         <div className="grid grid-cols-3 gap-2 items-end pt-2">
           {order.map(({ ev, rank }, idx) => {
             const step = STEP_STYLES[rank];
@@ -106,45 +105,6 @@ export const PlayMobilePodium: React.FC<PlayMobilePodiumProps> = React.memo(
             );
           })}
         </div>
-
-        {rest.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {rest.map((ev, i) => {
-              const isMe = ev.playerId === myPlayerId;
-              return (
-                <div
-                  key={ev.playerId}
-                  className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border ${
-                    isMe ? 'bg-[#FFF0F7] border-[#FF4A97]/40' : 'bg-[#FAF7FF] border-[#EDE2FF]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-display text-xs text-[#6E4F7D] w-6">{i + 4}º</span>
-                    <AvatarBadge avatar={ev.avatar} size="sm" isBot={ev.isBot} />
-                    <span className="font-display text-xs text-[#330043] truncate">
-                      {isMe ? 'Você' : ev.nickname}
-                    </span>
-                  </div>
-                  <span className="font-orbitron font-bold text-[11px] text-[#9747FF]">
-                    {ev.totalScore} pts
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <motion.button
-          type="button"
-          onClick={onOpenShareCard}
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.6 }}
-          className="w-full mt-1 bg-purple-pink bg-gradient-to-r from-[#9747FF] to-[#FF4A97] py-3.5 rounded-2xl font-semibold text-sm text-white shadow-[0_10px_24px_rgba(255,74,151,0.25)] flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <Share2 className="w-4 h-4" />
-          <span>Criar meu card para as redes</span>
-        </motion.button>
       </motion.div>
     );
   }

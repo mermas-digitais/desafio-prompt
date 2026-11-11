@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Download, Loader2, RectangleVertical, Share2, Square, X } from 'lucide-react';
+import { Check, Download, Loader2, RectangleVertical, Share2, Sparkles, Square, X } from 'lucide-react';
 import {
   SHARE_CARD_THEMES,
   buildShareText,
   canvasToBlob,
   downloadBlob,
   renderShareCard,
-  shareOrDownloadCard,
+  shareGeneral,
+  shareToInstagramStories,
   type ShareCardData,
   type ShareCardFormat,
   type ShareCardThemeId,
@@ -26,7 +27,7 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderSeqRef = useRef(0);
-  const [themeId, setThemeId] = useState<ShareCardThemeId>('neon');
+  const [themeId, setThemeId] = useState<ShareCardThemeId>('pastel');
   const [format, setFormat] = useState<ShareCardFormat>('story');
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [isRendering, setIsRendering] = useState(false);
@@ -55,18 +56,39 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
 
   useEffect(() => {
     if (!feedback) return undefined;
-    const t = window.setTimeout(() => setFeedback(null), 2600);
+    const t = window.setTimeout(() => setFeedback(null), 3200);
     return () => window.clearTimeout(t);
   }, [feedback]);
 
-  const handleShare = useCallback(async () => {
+  // Compartilhamento focado no Instagram Stories com deep link
+  const handleInstagramShare = useCallback(async () => {
     if (!data || !canvasRef.current || isRendering) return;
     setIsSharing(true);
     try {
-      const outcome = await shareOrDownloadCard(canvasRef.current, data, `${themeId}-${format}`);
-      if (outcome === 'shared') setFeedback('Card compartilhado! 💜');
-      else if (outcome === 'downloaded') setFeedback('Imagem salva! Poste nos seus Stories ✨');
-      else if (outcome === 'failed') setFeedback('Não deu para compartilhar agora.');
+      const outcome = await shareToInstagramStories(canvasRef.current, data);
+      if (outcome === 'shared_native') {
+        setFeedback('Selecione "Stories" ou "Feed" no Instagram! ✨');
+      } else if (outcome === 'opened_instagram_app') {
+        setFeedback('📸 Imagem salva! Abrindo Instagram Stories...');
+      } else {
+        setFeedback('Card salvo nos seus downloads! Poste nos Stories 💜');
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  }, [data, isRendering]);
+
+  // Compartilhamento geral (WhatsApp, Twitter/X, Telegram, etc.)
+  const handleGeneralShare = useCallback(async () => {
+    if (!data || !canvasRef.current || isRendering) return;
+    setIsSharing(true);
+    try {
+      const outcome = await shareGeneral(canvasRef.current, data, themeId, format);
+      if (outcome === 'shared') {
+        setFeedback('Card compartilhado com sucesso! 💜');
+      } else if (outcome === 'downloaded') {
+        setFeedback('Imagem salva! Texto copiado para a área de transferência ✨');
+      }
     } finally {
       setIsSharing(false);
     }
@@ -104,14 +126,15 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-md max-h-[96vh] overflow-y-auto bg-[#FAF7FF] rounded-t-3xl sm:rounded-3xl border border-[#DDC7F8] shadow-2xl flex flex-col"
           >
-            {/* Topo */}
+            {/* Topo do Estúdio */}
             <div className="sticky top-0 z-10 bg-[#FAF7FF]/95 backdrop-blur px-4 pt-4 pb-3 flex items-center justify-between border-b border-[#F3E8FF]">
               <div>
-                <div className="text-[10px] font-quicksand font-extrabold uppercase tracking-wider text-[#9747FF]">
-                  MDX26 • Desafio de Prompt
+                <div className="text-[10px] font-quicksand font-extrabold uppercase tracking-wider text-[#9747FF] flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-[#FF4A97]" />
+                  <span>MDX26 • Desafio de Prompt</span>
                 </div>
                 <h3 className="font-display text-lg text-[#330043] leading-tight">
-                  Seu card para compartilhar
+                  Seu Card para as Redes
                 </h3>
               </div>
               <button
@@ -124,10 +147,10 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
               </button>
             </div>
 
-            {/* Pré-visualização */}
+            {/* Pré-visualização do Canvas Renderizado */}
             <div className="px-4 pt-4 flex justify-center">
               <div
-                className={`relative rounded-2xl overflow-hidden border border-[#DDC7F8] shadow-[0_16px_40px_rgba(51,0,67,0.18)] bg-[#F5F0FF] ${
+                className={`relative rounded-2xl overflow-hidden border-2 border-[#DDC7F8] shadow-[0_16px_40px_rgba(51,0,67,0.18)] bg-[#F5F0FF] ${
                   format === 'story' ? 'w-[62%] aspect-[9/16]' : 'w-[78%] aspect-[4/5]'
                 }`}
               >
@@ -148,13 +171,13 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
               </div>
             </div>
 
-            {/* Formato */}
+            {/* Alternador de Formato (Stories 9:16 vs Feed 4:5) */}
             <div className="px-4 pt-4">
               <div className="bg-[#F5F0FF] p-1 rounded-2xl border border-[#DDC7F8] grid grid-cols-2 gap-1">
                 {(
                   [
-                    { id: 'story', label: 'Stories 9:16', Icon: RectangleVertical },
-                    { id: 'feed', label: 'Feed 4:5', Icon: Square },
+                    { id: 'story', label: 'Stories 9:16 (Instagram)', Icon: RectangleVertical },
+                    { id: 'feed', label: 'Feed 4:5 (Quadrado)', Icon: Square },
                   ] as const
                 ).map(({ id, label, Icon }) => (
                   <button
@@ -174,10 +197,11 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
               </div>
             </div>
 
-            {/* Temas */}
+            {/* Carrossel de Temas Visuais */}
             <div className="px-4 pt-4">
-              <div className="text-xs font-quicksand font-bold text-[#6E4F7D] mb-2">
-                Escolha a estética
+              <div className="text-xs font-quicksand font-bold text-[#6E4F7D] mb-2 flex items-center justify-between">
+                <span>Escolha o estilo visual:</span>
+                <span className="text-[10px] text-[#9747FF]">{SHARE_CARD_THEMES.length} variações</span>
               </div>
               <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
                 {SHARE_CARD_THEMES.map((theme) => {
@@ -189,7 +213,7 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
                       onClick={() => setThemeId(theme.id)}
                       className={`snap-start shrink-0 w-[118px] text-left rounded-2xl p-2 border-2 bg-white cursor-pointer transition-all ${
                         active
-                          ? 'border-[#9747FF] shadow-[0_8px_20px_rgba(151,71,255,0.2)]'
+                          ? 'border-[#9747FF] shadow-[0_8px_20px_rgba(151,71,255,0.22)]'
                           : 'border-[#EDE2FF]'
                       }`}
                     >
@@ -200,7 +224,7 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
                         }}
                       >
                         {active && (
-                          <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-white flex items-center justify-center">
+                          <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow-xs">
                             <Check className="w-3 h-3 text-[#9747FF]" />
                           </span>
                         )}
@@ -217,40 +241,63 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
               </div>
             </div>
 
-            {/* Ações */}
-            <div className="px-4 pt-4 pb-5 flex flex-col gap-2">
+            {/* Ações de Compartilhamento & Instagram Stories */}
+            <div className="px-4 pt-4 pb-5 flex flex-col gap-2.5">
+              {/* Botão Primário: Postar no Instagram Stories */}
               <button
                 type="button"
-                onClick={handleShare}
+                onClick={handleInstagramShare}
                 disabled={isRendering || isSharing}
-                className="w-full bg-purple-pink bg-gradient-to-r from-[#9747FF] to-[#FF4A97] py-3.5 rounded-2xl font-semibold text-sm text-white shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                className="w-full bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#FCAF45] py-3.5 px-4 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(253,29,29,0.25)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60 transition-transform active:scale-[0.98]"
               >
                 {isSharing ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Share2 className="w-4 h-4" />
+                  <svg
+                    className="w-4 h-4 fill-white"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                  </svg>
                 )}
-                <span>Compartilhar nas redes</span>
+                <span>Postar no Instagram Stories</span>
               </button>
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={isRendering}
-                className="w-full py-3 rounded-2xl bg-white border border-[#DDC7F8] font-quicksand font-bold text-sm text-[#4C1D95] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-              >
-                <Download className="w-4 h-4" />
-                <span>Salvar imagem</span>
-              </button>
+
+              {/* Botão Secundário: Compartilhar no WhatsApp / Outros */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleGeneralShare}
+                  disabled={isRendering || isSharing}
+                  className="py-2.5 px-3 rounded-2xl bg-white border border-[#DDC7F8] font-quicksand font-bold text-xs text-[#330043] flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60 hover:bg-[#F5F0FF] transition-colors"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-[#9747FF]" />
+                  <span>WhatsApp / Outros</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={isRendering}
+                  className="py-2.5 px-3 rounded-2xl bg-white border border-[#DDC7F8] font-quicksand font-bold text-xs text-[#4C1D95] flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60 hover:bg-[#F5F0FF] transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#FF4A97]" />
+                  <span>Salvar na Galeria</span>
+                </button>
+              </div>
+
               <p className="text-center font-quicksand text-[11px] text-[#6E4F7D]">
-                Marque <strong>@mermasdigitais</strong> e use <strong>#MDX26</strong> 💜
+                Marque <strong>@mermasdigitais</strong> com a hashtag <strong>#MDX26</strong> 💜
               </p>
+
               <AnimatePresence>
                 {feedback && (
                   <motion.div
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
-                    className="text-center text-xs font-quicksand font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl py-2"
+                    className="text-center text-xs font-quicksand font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl py-2 px-3 shadow-xs"
                   >
                     {feedback}
                   </motion.div>
