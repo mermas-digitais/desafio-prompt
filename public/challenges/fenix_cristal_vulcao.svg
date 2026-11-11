@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#090119"/>
+      <stop offset="50%" stop-color="#240846"/>
+      <stop offset="100%" stop-color="#58116A"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFD500"/>
+      <stop offset="48%" stop-color="#FF4A97"/>
+      <stop offset="100%" stop-color="#9747FF"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Céu Estrelado -->
+  <rect width="1024" height="1024" fill="url(#night)"/>
+  <g fill="#FFF" opacity="0.85">
+    <circle cx="120" cy="110" r="3"/><circle cx="240" cy="180" r="2"/><circle cx="390" cy="80" r="3.5"/>
+    <circle cx="660" cy="95" r="3"/><circle cx="820" cy="150" r="2.5"/><circle cx="910" cy="90" r="3"/>
+    <circle cx="160" cy="310" r="2"/><circle cx="870" cy="290" r="2.5"/>
+  </g>
+
+  <!-- Fênix de Cristal Translúcido Abrindo as Asas -->
+  <g filter="url(#glow)">
+    <!-- Asa Esquerda de Cristais Facetados -->
+    <polygon points="480,450 90,220 155,390 440,490" fill="url(#wing)" fill-opacity="0.88" stroke="#FFF" stroke-width="4"/>
+    <polygon points="455,480 120,410 210,545 450,530" fill="#FF4A97" fill-opacity="0.82" stroke="#FFD500" stroke-width="3"/>
+    <polygon points="450,520 200,565 310,660 470,560" fill="#9747FF" fill-opacity="0.85" stroke="#00E5FF" stroke-width="3"/>
+
+    <!-- Asa Direita de Cristais Facetados -->
+    <polygon points="544,450 934,220 869,390 584,490" fill="url(#wing)" fill-opacity="0.88" stroke="#FFF" stroke-width="4"/>
+    <polygon points="569,480 904,410 814,545 574,530" fill="#FF4A97" fill-opacity="0.82" stroke="#FFD500" stroke-width="3"/>
+    <polygon points="574,520 824,565 714,660 554,560" fill="#9747FF" fill-opacity="0.85" stroke="#00E5FF" stroke-width="3"/>
+
+    <!-- Corpo e Cabeça de Cristal Dourado e Rosa -->
+    <polygon points="512,240 475,330 512,590 549,330" fill="#FFD500" stroke="#FFFFFF" stroke-width="5"/>
+    <polygon points="512,175 490,245 512,230 534,245" fill="#00E5FF" stroke="#FFF" stroke-width="3"/>
+    <!-- Cauda Cristalina Longa -->
+    <polygon points="495,560 420,760 512,690 604,760 529,560" fill="url(#wing)" stroke="#FFD500" stroke-width="3"/>
+  </g>
+
+  <!-- Vulcão de Ametista Brilhante na Base -->
+  <polygon points="80,1024 350,690 674,690 944,1024" fill="#2A0944" stroke="#9747FF" stroke-width="5"/>
+  <!-- Cratera Luminosa e Cristais de Ametista -->
+  <ellipse cx="512" cy="690" rx="162" ry="34" fill="#FF4A97" stroke="#FFD500" stroke-width="5" filter="url(#glow)"/>
+  <g fill="#B5179E" stroke="#E0AAFF" stroke-width="3" filter="url(#glow)">
+    <polygon points="280,1024 330,780 390,1024"/>
+    <polygon points="634,1024 694,770 754,1024"/>
+    <polygon points="445,1024 512,735 579,1024" fill="#9747FF"/>
+  </g>
+</svg>

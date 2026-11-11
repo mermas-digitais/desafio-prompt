@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="room" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2C1810"/>
+      <stop offset="60%" stop-color="#4A2518"/>
+      <stop offset="100%" stop-color="#24110B"/>
+    </linearGradient>
+    <linearGradient id="chair" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9D174D"/>
+      <stop offset="100%" stop-color="#500724"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Biblioteca Aconchegante -->
+  <rect width="1024" height="1024" fill="url(#room)"/>
+
+  <!-- Estantes de Livros Antigos ao Fundo -->
+  <g fill="#3A1D12" stroke="#78350F" stroke-width="4">
+    <rect x="60" y="60" width="240" height="760" rx="8"/>
+    <rect x="724" y="60" width="240" height="760" rx="8"/>
+  </g>
+  <!-- Livros Coloridos nas Prateleiras -->
+  <g>
+    <rect x="85" y="110" width="32" height="110" fill="#9747FF"/><rect x="122" y="120" width="28" height="100" fill="#F59E0B"/>
+    <rect x="155" y="105" width="36" height="115" fill="#10B981"/><rect x="196" y="115" width="30" height="105" fill="#FF4A97"/>
+    <rect x="750" y="110" width="34" height="110" fill="#3B82F6"/><rect x="790" y="105" width="30" height="115" fill="#F59E0B"/>
+    <rect x="826" y="120" width="36" height="100" fill="#EC4899"/><rect x="868" y="110" width="32" height="110" fill="#8B5CF6"/>
+  </g>
+
+  <!-- Poltrona Aconchegante -->
+  <rect x="210" y="380" width="460" height="470" rx="95" fill="url(#chair)" stroke="#F59E0B" stroke-width="6"/>
+  <circle cx="210" cy="640" r="65" fill="#831843" stroke="#F59E0B" stroke-width="5"/>
+  <circle cx="670" cy="640" r="65" fill="#831843" stroke="#F59E0B" stroke-width="5"/>
+
+  <!-- Pequeno Dragão Verde Amigável de Óculos Redondos -->
+  <g>
+    <!-- Asinhas Douradas/Verdes -->
+    <path d="M 330 520 Q 220 430 265 585 Z" fill="#10B981" stroke="#FCD34D" stroke-width="4"/>
+    <path d="M 530 520 Q 635 430 595 585 Z" fill="#10B981" stroke="#FCD34D" stroke-width="4"/>
+    <!-- Corpo do Dragãozinho -->
+    <ellipse cx="435" cy="610" rx="115" ry="135" fill="#10B981" stroke="#059669" stroke-width="5"/>
+    <ellipse cx="435" cy="625" rx="72" ry="95" fill="#FDE68A"/>
+    <!-- Cabeça e Chifrinhos -->
+    <ellipse cx="445" cy="435" rx="95" ry="78" fill="#10B981" stroke="#059669" stroke-width="5"/>
+    <path d="M 390 365 Q 375 315 415 355" fill="#F59E0B" stroke="#FFF" stroke-width="3"/>
+    <path d="M 480 365 Q 505 315 460 355" fill="#F59E0B" stroke="#FFF" stroke-width="3"/>
+    <!-- Óculos Redondos na Ponta do Focinho -->
+    <circle cx="430" cy="430" r="28" fill="#FFFFFF" fill-opacity="0.25" stroke="#FFD500" stroke-width="6"/>
+    <circle cx="502" cy="430" r="28" fill="#FFFFFF" fill-opacity="0.25" stroke="#FFD500" stroke-width="6"/>
+    <line x1="458" y1="430" x2="474" y2="430" stroke="#FFD500" stroke-width="6"/>
+    <circle cx="432" cy="430" r="9" fill="#1E1B24"/>
+    <circle cx="500" cy="430" r="9" fill="#1E1B24"/>
+
+    <!-- Livro Antigo Aberto nas Mãos -->
+    <path d="M 315 680 Q 375 655 435 685 Q 495 655 555 680 L 545 770 Q 490 745 435 775 Q 380 745 325 770 Z" fill="#FEF3C7" stroke="#92400E" stroke-width="6"/>
+    <line x1="435" y1="685" x2="435" y2="775" stroke="#92400E" stroke-width="5"/>
+
+    <!-- Sopro Suave de Fogo Aquecendo a Chaleira de Chá -->
+    <path d="M 540 455 Q 640 445 735 510 Q 650 520 540 470 Z" fill="#FF8C42" stroke="#FFD500" stroke-width="4" filter="url(#glow)"/>
+  </g>
+
+  <!-- Mesa Lateral e Chaleira de Chá Fumegante -->
+  <rect x="700" y="610" width="210" height="240" rx="18" fill="#78350F" stroke="#F59E0B" stroke-width="4"/>
+  <ellipse cx="805" cy="545" rx="68" ry="52" fill="#00E5FF" stroke="#FFFFFF" stroke-width="5" filter="url(#glow)"/>
+  <path d="M 737 540 Q 695 505 737 485" fill="none" stroke="#FFFFFF" stroke-width="8"/>
+  <path d="M 870 535 Q 910 500 895 475" fill="none" stroke="#FFFFFF" stroke-width="8"/>
+  <!-- Vapor Perfumado do Chá -->
+  <path d="M 790 465 Q 775 425 805 395 Q 830 365 805 335" fill="none" stroke="#FFF" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+  <path d="M 830 470 Q 815 430 845 400" fill="none" stroke="#FFF" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+</svg>

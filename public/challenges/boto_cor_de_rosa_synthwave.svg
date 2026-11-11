@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#140028"/>
+      <stop offset="45%" stop-color="#4A0E78"/>
+      <stop offset="72%" stop-color="#C81D77"/>
+      <stop offset="100%" stop-color="#FF8C42"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFF05A"/>
+      <stop offset="50%" stop-color="#FF4A97"/>
+      <stop offset="100%" stop-color="#9747FF"/>
+    </linearGradient>
+    <linearGradient id="river" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2D0845"/>
+      <stop offset="50%" stop-color="#19042B"/>
+      <stop offset="100%" stop-color="#090014"/>
+    </linearGradient>
+    <linearGradient id="boto" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFB5E8"/>
+      <stop offset="55%" stop-color="#FF4A97"/>
+      <stop offset="100%" stop-color="#B5179E"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Céu Synthwave -->
+  <rect width="1024" height="640" fill="url(#sky)"/>
+
+  <!-- Estrelas -->
+  <g fill="#FFF" opacity="0.8">
+    <circle cx="140" cy="110" r="3"/><circle cx="280" cy="70" r="2"/><circle cx="480" cy="95" r="3.5"/>
+    <circle cx="760" cy="80" r="2.5"/><circle cx="890" cy="140" r="3"/><circle cx="640" cy="150" r="2"/>
+    <circle cx="190" cy="220" r="2.5"/><circle cx="830" cy="240" r="2"/>
+  </g>
+
+  <!-- Sol Gradeado Synthwave -->
+  <circle cx="512" cy="430" r="210" fill="url(#sun)" filter="url(#glow)"/>
+  <g fill="#380A5C">
+    <rect x="290" y="450" width="444" height="8"/>
+    <rect x="290" y="478" width="444" height="10"/>
+    <rect x="290" y="510" width="444" height="13"/>
+    <rect x="290" y="546" width="444" height="16"/>
+    <rect x="290" y="586" width="444" height="22"/>
+  </g>
+
+  <!-- Silhueta da Floresta Amazônica no Horizonte -->
+  <path d="M0 640 L0 560 Q60 520 120 565 Q180 510 250 560 Q310 530 370 575 L650 575 Q710 525 780 565 Q850 510 920 560 Q970 530 1024 555 L1024 640 Z" fill="#160029"/>
+
+  <!-- Rio Amazônico Espelhado com Grade Neon -->
+  <rect x="0" y="640" width="1024" height="384" fill="url(#river)"/>
+  <g stroke="#FF4A97" stroke-opacity="0.35" stroke-width="2">
+    <line x1="0" y1="670" x2="1024" y2="670"/>
+    <line x1="0" y1="710" x2="1024" y2="710"/>
+    <line x1="0" y1="765" x2="1024" y2="765"/>
+    <line x1="0" y1="835" x2="1024" y2="835"/>
+    <line x1="0" y1="925" x2="1024" y2="925"/>
+    <line x1="512" y1="640" x2="100" y2="1024"/>
+    <line x1="512" y1="640" x2="300" y2="1024"/>
+    <line x1="512" y1="640" x2="512" y2="1024"/>
+    <line x1="512" y1="640" x2="724" y2="1024"/>
+    <line x1="512" y1="640" x2="924" y2="1024"/>
+  </g>
+
+  <!-- Reflexo Dourado/Rosa na Água -->
+  <ellipse cx="512" cy="700" rx="190" ry="22" fill="#FF4A97" opacity="0.45" filter="url(#glow)"/>
+  <ellipse cx="512" cy="755" rx="140" ry="16" fill="#FFD500" opacity="0.35" filter="url(#glow)"/>
+
+  <!-- Vitórias-Régias Bioluminescentes -->
+  <ellipse cx="210" cy="790" rx="85" ry="26" fill="#00E5FF" opacity="0.25" stroke="#00E5FF" stroke-width="3"/>
+  <ellipse cx="820" cy="830" rx="95" ry="28" fill="#00E5FF" opacity="0.25" stroke="#00E5FF" stroke-width="3"/>
+
+  <!-- Boto-Cor-de-Rosa Cibernético Saltando -->
+  <g transform="translate(0, -20)">
+    <!-- Corpo arqueado do Boto -->
+    <path d="M 300 560 C 330 350, 560 270, 700 410 C 745 455, 795 465, 815 455 C 825 450, 830 468, 800 482 C 760 500, 720 490, 675 465 C 565 405, 430 440, 355 595 C 335 635, 280 650, 250 680 C 275 630, 290 600, 300 560 Z" fill="url(#boto)" stroke="#FFF" stroke-width="4" filter="url(#glow)"/>
+    <!-- Nadadeira Dorsal -->
+    <path d="M 485 345 C 470 280, 520 275, 545 342 Z" fill="#FF4A97" stroke="#00E5FF" stroke-width="3"/>
+    <!-- Nadadeira Peitoral -->
+    <path d="M 555 445 C 535 515, 585 530, 610 460 Z" fill="#E01E84" stroke="#00E5FF" stroke-width="3"/>
+    <!-- Cauda -->
+    <path d="M 310 595 C 250 580, 235 630, 290 635 C 270 675, 325 685, 345 620 Z" fill="#FF4A97" stroke="#00E5FF" stroke-width="3"/>
+    <!-- Linhas de Circuito Neon no Boto -->
+    <path d="M 410 460 L 470 415 L 540 415 L 590 390" fill="none" stroke="#00E5FF" stroke-width="4" stroke-linecap="round" filter="url(#glow)"/>
+    <circle cx="410" cy="460" r="6" fill="#00E5FF"/>
+    <circle cx="590" cy="390" r="6" fill="#00E5FF"/>
+    <!-- Olho e Óculos Neon -->
+    <rect x="665" y="388" width="44" height="20" rx="8" transform="rotate(18 685 398)" fill="#00E5FF" stroke="#FFF" stroke-width="3" filter="url(#glow)"/>
+    <!-- Chapéu Panamá Iluminado por Neon -->
+    <g transform="translate(650, 315) rotate(18)">
+      <ellipse cx="45" cy="48" rx="68" ry="16" fill="#FFF8E7" stroke="#00E5FF" stroke-width="4" filter="url(#glow)"/>
+      <path d="M 8 44 Q 16 4 45 6 Q 74 4 82 44 Z" fill="#FFF8E7" stroke="#FF4A97" stroke-width="3"/>
+      <path d="M 10 38 Q 45 46 80 38" fill="none" stroke="#FF4A97" stroke-width="8"/>
+    </g>
+  </g>
+
+  <!-- Respingos Luminosos de Água -->
+  <g fill="#00E5FF" filter="url(#glow)">
+    <circle cx="290" cy="645" r="10"/><circle cx="260" cy="620" r="7"/><circle cx="350" cy="655" r="9"/>
+    <circle cx="760" cy="520" r="8"/><circle cx="805" cy="545" r="6"/><circle cx="730" cy="555" r="7"/>
+  </g>
+</svg>

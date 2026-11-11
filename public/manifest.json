@@ -1,0 +1,18 @@
+{
+  "name": "Desafio de Prompt — MDX STEAM 2026",
+  "short_name": "Desafio Prompt",
+  "description": "Arena Party Game de IA & Engenharia de Prompt — Mermãs Digitais IFMA",
+  "start_url": "/play",
+  "display": "standalone",
+  "background_color": "#FAF7FF",
+  "theme_color": "#330043",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/marca/selo-sozinho.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

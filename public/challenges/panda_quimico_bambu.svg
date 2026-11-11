@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0E3B2E"/>
+      <stop offset="55%" stop-color="#1A5E48"/>
+      <stop offset="100%" stop-color="#282048"/>
+    </linearGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF4A97"/>
+      <stop offset="50%" stop-color="#9747FF"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Estufa Tecnológica de Bambu -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g stroke="#4EF2A5" stroke-opacity="0.22" stroke-width="3" fill="none">
+    <path d="M0 220 Q512 40 1024 220"/>
+    <path d="M0 440 Q512 260 1024 440"/>
+    <line x1="220" y1="0" x2="140" y2="1024"/>
+    <line x1="804" y1="0" x2="884" y2="1024"/>
+  </g>
+
+  <!-- Bambus Gigantes Iluminados -->
+  <g fill="#2AD17E" stroke="#A7F3D0" stroke-width="3">
+    <rect x="70" y="60" width="38" height="820" rx="12"/>
+    <line x1="65" y1="240" x2="113" y2="240" stroke-width="6"/>
+    <line x1="65" y1="450" x2="113" y2="450" stroke-width="6"/>
+    <line x1="65" y1="660" x2="113" y2="660" stroke-width="6"/>
+    <rect x="135" y="140" width="30" height="740" rx="10" opacity="0.8"/>
+    <rect x="895" y="80" width="38" height="800" rx="12"/>
+    <line x1="890" y1="280" x2="938" y2="280" stroke-width="6"/>
+    <line x1="890" y1="510" x2="938" y2="510" stroke-width="6"/>
+    <rect x="835" y="160" width="28" height="720" rx="10" opacity="0.8"/>
+  </g>
+
+  <!-- Nuvem Químico-Mágica com Estrelas Coloridas -->
+  <g filter="url(#glow)">
+    <circle cx="512" cy="230" r="105" fill="url(#cloud)" opacity="0.8"/>
+    <circle cx="405" cy="260" r="78" fill="#FF4A97" opacity="0.75"/>
+    <circle cx="620" cy="255" r="82" fill="#00E5FF" opacity="0.75"/>
+    <circle cx="512" cy="340" r="60" fill="#9747FF" opacity="0.8"/>
+    <!-- Estrelas Douradas Flutuando na Fumaça -->
+    <polygon points="512,130 526,166 565,166 534,188 545,224 512,202 479,224 490,188 459,166 498,166" fill="#FFD500"/>
+    <polygon points="390,195 399,218 424,218 404,232 411,255 390,241 369,255 376,232 356,218 381,218" fill="#FFF"/>
+    <polygon points="635,185 644,208 669,208 649,222 656,245 635,231 614,245 621,222 601,208 626,208" fill="#FFD500"/>
+  </g>
+
+  <!-- Urso Panda Cientista Fofo -->
+  <g transform="translate(0, 35)">
+    <!-- Orelhas Pretas -->
+    <circle cx="385" cy="410" r="48" fill="#1E1B24"/>
+    <circle cx="639" cy="410" r="48" fill="#1E1B24"/>
+    <!-- Corpo com Jaleco Branco -->
+    <path d="M 320 820 C 325 620, 699 620, 704 820 Z" fill="#FFFFFF" stroke="#DDC7F8" stroke-width="6"/>
+    <!-- Lapela do Jaleco e Gravata Borboleta Roxa -->
+    <polygon points="465,640 512,670 465,700" fill="#9747FF"/>
+    <polygon points="559,640 512,670 559,700" fill="#FF4A97"/>
+    <circle cx="512" cy="670" r="14" fill="#FFD500"/>
+    <!-- Cabeça do Panda -->
+    <ellipse cx="512" cy="515" rx="145" ry="125" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="5"/>
+    <!-- Manchas dos Olhos -->
+    <ellipse cx="450" cy="505" rx="44" ry="36" transform="rotate(-12 450 505)" fill="#1E1B24"/>
+    <ellipse cx="574" cy="505" rx="44" ry="36" transform="rotate(12 574 505)" fill="#1E1B24"/>
+    <!-- Olhos Brilhantes -->
+    <circle cx="452" cy="502" r="15" fill="#FFF"/><circle cx="455" cy="498" r="6" fill="#00E5FF"/>
+    <circle cx="572" cy="502" r="15" fill="#FFF"/><circle cx="569" cy="498" r="6" fill="#00E5FF"/>
+    <!-- Óculos de Proteção Científicos (Goggles) -->
+    <rect x="392" y="466" width="110" height="72" rx="28" fill="#00E5FF" fill-opacity="0.22" stroke="#FFD500" stroke-width="8"/>
+    <rect x="522" y="466" width="110" height="72" rx="28" fill="#00E5FF" fill-opacity="0.22" stroke="#FFD500" stroke-width="8"/>
+    <line x1="502" y1="502" x2="522" y2="502" stroke="#FFD500" stroke-width="8"/>
+    <!-- Focinho e Sorriso -->
+    <ellipse cx="512" cy="552" rx="22" ry="15" fill="#1E1B24"/>
+    <path d="M 485 575 Q 512 600 539 575" fill="none" stroke="#1E1B24" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- Bancada do Laboratório e Frascos de Quimica Brilhantes -->
+  <rect x="140" y="830" width="744" height="194" rx="24" fill="#1F1638" stroke="#9747FF" stroke-width="5"/>
+  <!-- Erlenmeyer Central Soltando Estrelas -->
+  <path d="M 482 650 L 542 650 L 542 700 L 595 815 L 429 815 L 482 700 Z" fill="#FF4A97" fill-opacity="0.85" stroke="#FFFFFF" stroke-width="6" filter="url(#glow)"/>
+  <!-- Tubos de Ensaio Laterais -->
+  <rect x="310" y="690" width="42" height="125" rx="21" fill="#00E5FF" stroke="#FFF" stroke-width="5" filter="url(#glow)"/>
+  <rect x="670" y="690" width="42" height="125" rx="21" fill="#FFD500" stroke="#FFF" stroke-width="5" filter="url(#glow)"/>
+</svg>

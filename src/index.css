@@ -1,0 +1,343 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --mermas-bg: #FAF7FF;
+    --mermas-white: #FFFFFF;
+    --mermas-plum: #330043;
+    --mermas-text-secondary: #545454;
+    --mermas-purple-soft: #6E4F7D;
+    --mermas-purple-mid: #9854CB;
+    --mermas-purple-neon: #9747FF;
+    --mermas-pink: #FF4A97;
+    --mermas-yellow: #FFCD34;
+    --mermas-gold: #FFD500;
+    --mermas-lilac-light: #F5F0FF;
+    --mermas-lilac-border: #DDC7F8;
+    --mermas-rose-soft: #FEF0ED;
+
+    --font-display: 'Paytone One', sans-serif;
+    --font-sans: 'Poppins', sans-serif;
+    --font-body: 'Quicksand', sans-serif;
+    --font-prompt: 'Atkinson Hyperlegible', sans-serif;
+    --font-mono-arcade: 'Orbitron', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--mermas-bg);
+    color: var(--mermas-plum);
+    background-image:
+      radial-gradient(circle at 8% 12%, rgba(151, 71, 255, 0.08) 0%, transparent 42%),
+      radial-gradient(circle at 92% 16%, rgba(255, 74, 151, 0.07) 0%, transparent 38%),
+      radial-gradient(circle at 85% 88%, rgba(254, 240, 237, 0.85) 0%, transparent 48%),
+      linear-gradient(180deg, #FAF7FF 0%, #FFFFFF 52%, #F6F0FF 100%);
+    min-height: 100vh;
+  }
+}
+
+/* Tipografia utilitária Mermãs Digitais */
+.font-display {
+  font-family: 'Paytone One', sans-serif;
+  letter-spacing: 0.01em;
+}
+
+.font-quicksand {
+  font-family: 'Quicksand', sans-serif;
+}
+
+.font-prompt {
+  font-family: 'Atkinson Hyperlegible', sans-serif;
+}
+
+.font-orbitron {
+  font-family: 'Orbitron', monospace;
+}
+
+/* Gradientes Oficiais mermas-site-react */
+.bg-purple-pink {
+  background: linear-gradient(to bottom right, #9747ff, #ff4a97);
+}
+
+.bg-pink-yellow {
+  background: linear-gradient(to bottom right, #ff4a97, #ffd500);
+}
+
+/* Botão Secundário Oficial com Borda em Gradiente (ButtonSecond do mermas-site-react) */
+.border-gradient {
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(to bottom right, #9747ff, #ff4a97) border-box;
+  border: 2px solid transparent;
+  color: #FF4A97;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.border-gradient:hover:not(:disabled) {
+  background:
+    linear-gradient(#FDF8FF, #FDF8FF) padding-box,
+    linear-gradient(to bottom right, #9747ff, #ff4a97) border-box;
+  box-shadow: 0 6px 20px rgba(151, 71, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+/* Cartão Oficial Mermãs Digitais (Light Mode & Zero Poluição Visual) */
+.mermas-card {
+  background-color: #FFFFFF;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(221, 199, 248, 0.85);
+  box-shadow: 0 10px 30px rgba(51, 0, 67, 0.06);
+}
+
+/* Input Oficial Mermãs Digitais */
+.mermas-input {
+  background-color: #F6F6F6;
+  border: 2px solid #E9D8FD;
+  border-radius: 1rem;
+  color: #330043;
+  transition: all 0.2s ease;
+}
+
+.mermas-input::placeholder {
+  color: #8E7A9E;
+}
+
+.mermas-input:focus {
+  background-color: #FFFFFF;
+  border-color: #FF4A97;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(255, 74, 151, 0.12);
+}
+
+/* Botão Circular Suave (buttonCircle do mermas-site-react) */
+.buttonCircle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background-color: #F5F0FF;
+  border: 1px solid #DDC7F8;
+  color: #330043;
+  transition: all 0.2s ease;
+}
+
+.buttonCircle:hover {
+  background-color: #EDE2FF;
+  border-color: #9747FF;
+  color: #9747FF;
+}
+
+/* Compatibilidade suave para classes antigas se referenciadas */
+.mdx-card-3d,
+.mdx-card-pink-3d,
+.mdx-card-yellow-3d {
+  background-color: #FFFFFF;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(221, 199, 248, 0.85);
+  box-shadow: 0 10px 30px rgba(51, 0, 67, 0.06);
+}
+
+.mdx-btn-pink {
+  background: linear-gradient(to bottom right, #9747ff, #ff4a97);
+  color: #FFFFFF;
+  box-shadow: 0 8px 20px rgba(255, 74, 151, 0.28);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mdx-btn-pink:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(255, 74, 151, 0.36);
+}
+
+.mdx-btn-yellow {
+  background: linear-gradient(to bottom right, #ff4a97, #ffd500);
+  color: #FFFFFF;
+  box-shadow: 0 8px 20px rgba(255, 74, 151, 0.24);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Animações sutis de interface e Equalizador de Áudio (GPU Composited) */
+@keyframes mdxFloat {
+  0%, 100% {
+    transform: translate3d(0, 0px, 0);
+  }
+  50% {
+    transform: translate3d(0, -4px, 0);
+  }
+}
+
+@keyframes mdxEqBarA {
+  0%, 100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes mdxEqBarB {
+  0%, 100% {
+    transform: scaleY(0.95);
+  }
+  45% {
+    transform: scaleY(0.28);
+  }
+}
+
+@keyframes mdxEqBarC {
+  0%, 100% {
+    transform: scaleY(0.45);
+  }
+  35% {
+    transform: scaleY(1);
+  }
+  75% {
+    transform: scaleY(0.3);
+  }
+}
+
+.mdx-float {
+  will-change: transform;
+  animation: mdxFloat 4.5s ease-in-out infinite;
+}
+
+.mdx-eq-bar-1 {
+  transform-origin: bottom;
+  animation: mdxEqBarA 0.75s ease-in-out infinite;
+}
+
+.mdx-eq-bar-2 {
+  transform-origin: bottom;
+  animation: mdxEqBarB 0.65s ease-in-out infinite;
+}
+
+.mdx-eq-bar-3 {
+  transform-origin: bottom;
+  animation: mdxEqBarC 0.85s ease-in-out infinite;
+}
+
+/* Textura pontilhada editorial sutil para o palco */
+.mdx-stage-dot-grid {
+  background-image: radial-gradient(rgba(151, 71, 255, 0.13) 1.25px, transparent 1.25px);
+  background-size: 28px 28px;
+}
+
+/* Ocultar barra de rolagem em containers internos */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Loop contínuo suave (Marquee) para fila de conquistas quando ultrapassa o espaço */
+@keyframes mdxMarqueeLoop {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.mdx-marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: mdxMarqueeLoop var(--marquee-duration, 14s) linear infinite;
+}
+
+.mdx-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+.mdx-marquee-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000000 6%,
+    #000000 94%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000000 6%,
+    #000000 94%,
+    transparent 100%
+  );
+}
+
+/* Shimmer luminoso Mermãs Digitais para loading e transição de filtros no Ranking */
+@keyframes mdxShimmerSweep {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(200%, 0, 0);
+  }
+}
+
+.mdx-shimmer-overlay {
+  position: absolute;
+  inset: 0;
+  width: 55%;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(151, 71, 255, 0.1) 30%,
+    rgba(255, 74, 151, 0.18) 50%,
+    rgba(255, 205, 52, 0.12) 70%,
+    transparent 100%
+  );
+  transform: translate3d(-100%, 0, 0);
+  animation: mdxShimmerSweep 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.mdx-skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: #F6F0FF;
+}
+
+.mdx-skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 60%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.85) 50%,
+    transparent 100%
+  );
+  transform: translate3d(-100%, 0, 0);
+  animation: mdxShimmerSweep 1.35s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Scrollbar delicada no tema claro */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F5F0FF;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #DDC7F8;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9854CB;
+}
