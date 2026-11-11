@@ -9,6 +9,7 @@ import {
   Globe,
   MessageSquareHeart,
   Palette,
+  Share2,
   Target,
   Trophy,
   Zap,
@@ -28,10 +29,11 @@ export interface PlayResultViewProps {
   myEvaluation: PlayerRoundEvaluation | undefined;
   myPowerTier: PlayerPowerTierInfo;
   onOpenRanking: () => void;
+  onOpenShareCard?: () => void;
 }
 
 export const PlayResultView: React.FC<PlayResultViewProps> = React.memo(
-  ({ myEvaluation, myPowerTier, onOpenRanking }) => {
+  ({ myEvaluation, myPowerTier, onOpenRanking, onOpenShareCard }) => {
     const fullPrompt = useGameStore((s) => s.roomState.challenge?.fullPrompt);
 
     return (
@@ -254,14 +256,27 @@ export const PlayResultView: React.FC<PlayResultViewProps> = React.memo(
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={onOpenRanking}
-              className="w-full bg-purple-pink py-3.5 px-5 rounded-2xl font-semibold text-sm text-white shadow-sm flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Trophy className="w-4 h-4" />
-              <span>Ver Ranking Geral</span>
-            </button>
+            <div className="flex flex-col gap-2.5 pt-1">
+              {onOpenShareCard && (
+                <button
+                  type="button"
+                  onClick={onOpenShareCard}
+                  className="w-full bg-gradient-to-r from-[#FF4A97] via-[#9747FF] to-[#FFCD34] py-3.5 px-5 rounded-2xl font-display text-sm text-white shadow-[0_10px_24px_rgba(151,71,255,0.25)] flex items-center justify-center gap-2 cursor-pointer hover:opacity-95 transition-all active:scale-[0.98]"
+                >
+                  <Share2 className="w-4 h-4 text-white" />
+                  <span>Criar Card para Redes Sociais</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={onOpenRanking}
+                className="w-full bg-white hover:bg-[#F5F0FF] border-2 border-[#DDC7F8] py-3 px-5 rounded-2xl font-quicksand font-bold text-sm text-[#4C1D95] shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <Trophy className="w-4 h-4 text-[#9747FF]" />
+                <span>Ver Ranking Geral</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="mermas-card p-6 text-center space-y-2">
