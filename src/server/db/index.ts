@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
@@ -23,13 +24,76 @@ export interface StoredMatchRecord {
   createdAt: string;
 }
 
-const LEGACY_LOCAL_DB_FILE = path.resolve(process.cwd(), '.data', 'local-db.json');
+interface LocalPlayerRow {
+  id: string;
+  deviceId: string;
+  nickname: string;
+  avatar: AvatarId;
+  highScore: number;
+  totalScore: number;
+  matchesPlayed: number;
+  winsCount: number;
+  isBot: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
-class PostgresDatabase {
+interface LocalDbData {
+  players: LocalPlayerRow[];
+  matches: StoredMatchRecord[];
+}
+
+const LOCAL_DB_FILE = path.resolve(process.cwd(), '.data', 'local-db.json');
+
+class AppDatabase {
   private pool: pg.Pool | null = null;
   private db: NodePgDatabase<typeof schema> | null = null;
   private connected = false;
+  private useLocalDb = false;
   private pgVersion = 'PostgreSQL 18';
+  private localData: LocalDbData = { players: [], matches: [] };
+
+  private ensureLocalStoreLoaded(): void {
+    try {
+      const dir = path.dirname(LOCAL_DB_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      if (fs.existsSync(LOCAL_DB_FILE)) {
+        const raw = fs.readFileSync(LOCAL_DB_FILE, 'utf-8');
+        const parsed = JSON.parse(raw) as Partial<LocalDbData>;
+        this.localData = {
+          players: Array.isArray(parsed.players) ? parsed.players : [],
+          matches: Array.isArray(parsed.matches) ? parsed.matches : [],
+        };
+      } else {
+        this.saveLocalStore();
+      }
+    } catch {
+      this.localData = { players: [], matches: [] };
+    }
+  }
+
+  private saveLocalStore(): void {
+    try {
+      const dir = path.dirname(LOCAL_DB_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(LOCAL_DB_FILE, JSON.stringify(this.localData, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('⚠️ [DB Local] Falha ao salvar .data/local-db.json:', err);
+    }
+  }
+
+  private activateLocalFallback(reason: string): void {
+    this.connected = false;
+    this.db = null;
+    this.useLocalDb = true;
+    this.pgVersion = 'Local JSON DB (Dev Mode)';
+    this.ensureLocalStoreLoaded();
+    console.log(`📂 [DB] ${reason} -> Usando banco local em .data/local-db.json`);
+  }
 
   private ensureDb(): NodePgDatabase<typeof schema> {
     if (!this.db) {
@@ -55,7 +119,7 @@ class PostgresDatabase {
 
       const adminClient = new Client({
         connectionString: adminUrl.toString(),
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 4000,
       });
       await adminClient.connect();
       try {
@@ -79,80 +143,87 @@ class PostgresDatabase {
   public async init(): Promise<void> {
     const dbUrl = (process.env.DATABASE_URL || '').trim();
     if (!dbUrl) {
-      throw new Error(
-        '❌ [DB] DATABASE_URL não está definida no arquivo .env! Configure a URL do seu PostgreSQL 18.'
-      );
+      this.activateLocalFallback('DATABASE_URL ausente no .env');
+      return;
     }
 
-    await this.ensureDatabaseExists(dbUrl);
-
-    this.pool = new Pool({
-      connectionString: dbUrl,
-      connectionTimeoutMillis: 6000,
-      max: 15,
-    });
-
-    const client = await this.pool.connect();
     try {
-      const versionRes = await client.query('SHOW server_version;');
-      const rawVersion = versionRes.rows?.[0]?.server_version || '18';
-      this.pgVersion = `PostgreSQL ${rawVersion}`;
+      await this.ensureDatabaseExists(dbUrl);
 
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS players (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          device_id VARCHAR(128) UNIQUE NOT NULL,
-          nickname VARCHAR(40) NOT NULL,
-          avatar TEXT NOT NULL DEFAULT 'menina-mdx',
-          high_score INTEGER NOT NULL DEFAULT 0,
-          total_score INTEGER NOT NULL DEFAULT 0,
-          matches_played INTEGER NOT NULL DEFAULT 0,
-          wins_count INTEGER NOT NULL DEFAULT 0,
-          is_bot BOOLEAN NOT NULL DEFAULT false,
-          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-        );
+      this.pool = new Pool({
+        connectionString: dbUrl,
+        connectionTimeoutMillis: 5000,
+        max: 15,
+      });
 
-        ALTER TABLE players ALTER COLUMN avatar TYPE TEXT;
+      const client = await this.pool.connect();
+      try {
+        const versionRes = await client.query('SHOW server_version;');
+        const rawVersion = versionRes.rows?.[0]?.server_version || '18';
+        this.pgVersion = `PostgreSQL ${rawVersion}`;
 
-        CREATE INDEX IF NOT EXISTS idx_players_high_score ON players (high_score DESC);
-        CREATE INDEX IF NOT EXISTS idx_players_wins_count ON players (wins_count DESC);
-        CREATE INDEX IF NOT EXISTS idx_players_is_bot ON players (is_bot);
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS players (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            device_id VARCHAR(128) UNIQUE NOT NULL,
+            nickname VARCHAR(40) NOT NULL,
+            avatar TEXT NOT NULL DEFAULT 'menina-mdx',
+            high_score INTEGER NOT NULL DEFAULT 0,
+            total_score INTEGER NOT NULL DEFAULT 0,
+            matches_played INTEGER NOT NULL DEFAULT 0,
+            wins_count INTEGER NOT NULL DEFAULT 0,
+            is_bot BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+          );
 
-        CREATE TABLE IF NOT EXISTS challenges (
-          id VARCHAR(64) PRIMARY KEY,
-          title VARCHAR(120) NOT NULL,
-          category VARCHAR(64) NOT NULL,
-          difficulty VARCHAR(24) NOT NULL,
-          image_url VARCHAR(255) NOT NULL,
-          full_prompt TEXT NOT NULL,
-          subject_layer TEXT NOT NULL,
-          style_layer TEXT NOT NULL,
-          environment_layer TEXT NOT NULL,
-          hint_1 TEXT NOT NULL,
-          hint_2 TEXT NOT NULL,
-          keywords_json TEXT NOT NULL
-        );
+          ALTER TABLE players ALTER COLUMN avatar TYPE TEXT;
 
-        CREATE TABLE IF NOT EXISTS matches (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          room_code VARCHAR(16) NOT NULL,
-          challenge_id VARCHAR(64) NOT NULL,
-          winner_player_id UUID,
-          results_json TEXT NOT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT NOW()
-        );
-      `);
-    } finally {
-      client.release();
+          CREATE INDEX IF NOT EXISTS idx_players_high_score ON players (high_score DESC);
+          CREATE INDEX IF NOT EXISTS idx_players_wins_count ON players (wins_count DESC);
+          CREATE INDEX IF NOT EXISTS idx_players_is_bot ON players (is_bot);
+
+          CREATE TABLE IF NOT EXISTS challenges (
+            id VARCHAR(64) PRIMARY KEY,
+            title VARCHAR(120) NOT NULL,
+            category VARCHAR(64) NOT NULL,
+            difficulty VARCHAR(24) NOT NULL,
+            image_url VARCHAR(255) NOT NULL,
+            full_prompt TEXT NOT NULL,
+            subject_layer TEXT NOT NULL,
+            style_layer TEXT NOT NULL,
+            environment_layer TEXT NOT NULL,
+            hint_1 TEXT NOT NULL,
+            hint_2 TEXT NOT NULL,
+            keywords_json TEXT NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS matches (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            room_code VARCHAR(16) NOT NULL,
+            challenge_id VARCHAR(64) NOT NULL,
+            winner_player_id UUID,
+            results_json TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+          );
+        `);
+      } finally {
+        client.release();
+      }
+
+      this.db = drizzle(this.pool, { schema });
+      this.connected = true;
+      this.useLocalDb = false;
+      console.log(`✅ [DB] Conectado oficialmente ao ${this.pgVersion} via Drizzle ORM.`);
+
+      await this.seedPostgresIfNeeded();
+    } catch (err) {
+      if (process.env.NODE_ENV === 'production') {
+        throw err;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      this.activateLocalFallback(`PostgreSQL inacessível em modo dev (${msg})`);
     }
-
-    this.db = drizzle(this.pool, { schema });
-    this.connected = true;
-    console.log(`✅ [DB] Conectado oficialmente ao ${this.pgVersion} via Drizzle ORM (Sem JSON local).`);
-
-    await this.migrateAndRemoveLegacyLocalJson();
-    await this.seedPostgresIfNeeded();
   }
 
   public isPostgresActive(): boolean {
@@ -163,53 +234,8 @@ class PostgresDatabase {
     return this.pgVersion;
   }
 
-  /**
-   * Se existir um arquivo legado .data/local-db.json de sessões anteriores,
-   * migra jogadoras humanas para o PostgreSQL 18 e apaga o arquivo local definitivamente.
-   */
-  private async migrateAndRemoveLegacyLocalJson(): Promise<void> {
-    if (!this.db || !fs.existsSync(LEGACY_LOCAL_DB_FILE)) return;
-
-    try {
-      const raw = fs.readFileSync(LEGACY_LOCAL_DB_FILE, 'utf-8');
-      const parsed = JSON.parse(raw) as {
-        players?: Array<PlayerProfile>;
-      };
-
-      if (Array.isArray(parsed.players)) {
-        for (const p of parsed.players) {
-          if (
-            !p.deviceId ||
-            p.isBot ||
-            p.deviceId.startsWith('seed-') ||
-            p.deviceId.startsWith('bot-')
-          ) {
-            continue;
-          }
-          const existing = await this.findPlayerByDeviceId(p.deviceId);
-          if (!existing) {
-            await this.db.insert(schema.players).values({
-              deviceId: p.deviceId,
-              nickname: p.nickname || 'Jogadora MDX',
-              avatar: p.avatar || 'menina-mdx',
-              highScore: Number(p.highScore || 0),
-              totalScore: Number(p.totalScore || 0),
-              matchesPlayed: Number(p.matchesPlayed || 0),
-              winsCount: Number(p.winsCount || 0),
-              isBot: false,
-            });
-          }
-        }
-      }
-
-      fs.unlinkSync(LEGACY_LOCAL_DB_FILE);
-      console.log('🧹 [DB] Arquivo legado .data/local-db.json migrado e removido (100% PostgreSQL 18).');
-    } catch {
-      // Ignora caso já tenha sido removido
-    }
-  }
-
   public async seedPostgresIfNeeded(): Promise<void> {
+    if (this.useLocalDb) return;
     const db = this.ensureDb();
 
     for (const challenge of OFFICIAL_CHALLENGES) {
@@ -254,6 +280,22 @@ class PostgresDatabase {
   }
 
   public async clearAllRankings(): Promise<void> {
+    if (this.useLocalDb) {
+      this.localData.matches = [];
+      this.localData.players = this.localData.players
+        .filter((p) => !p.isBot && !p.deviceId.startsWith('seed-') && !p.deviceId.startsWith('bot-'))
+        .map((p) => ({
+          ...p,
+          highScore: 0,
+          totalScore: 0,
+          matchesPlayed: 0,
+          winsCount: 0,
+          updatedAt: new Date().toISOString(),
+        }));
+      this.saveLocalStore();
+      return;
+    }
+
     const db = this.ensureDb();
     await db.execute(sql`DELETE FROM matches`);
     await db.execute(
@@ -265,6 +307,14 @@ class PostgresDatabase {
   }
 
   public async deletePlayerById(playerId: string): Promise<boolean> {
+    if (this.useLocalDb) {
+      const before = this.localData.players.length;
+      this.localData.players = this.localData.players.filter((p) => p.id !== playerId);
+      const changed = this.localData.players.length !== before;
+      if (changed) this.saveLocalStore();
+      return changed;
+    }
+
     const db = this.ensureDb();
     const deleted = await db
       .delete(schema.players)
@@ -286,6 +336,23 @@ class PostgresDatabase {
       updatedAt: string;
     }>
   > {
+    if (this.useLocalDb) {
+      return this.localData.players
+        .filter((p) => !p.isBot)
+        .sort((a, b) => b.highScore - a.highScore || b.winsCount - a.winsCount)
+        .map((r) => ({
+          id: r.id,
+          deviceId: r.deviceId,
+          nickname: r.nickname,
+          avatar: r.avatar,
+          highScore: r.highScore,
+          totalScore: r.totalScore,
+          matchesPlayed: r.matchesPlayed,
+          winsCount: r.winsCount,
+          updatedAt: r.updatedAt,
+        }));
+    }
+
     const db = this.ensureDb();
     const rows = await db
       .select()
@@ -307,6 +374,22 @@ class PostgresDatabase {
   }
 
   public async findPlayerByDeviceId(deviceId: string): Promise<PlayerProfile | null> {
+    if (this.useLocalDb) {
+      const r = this.localData.players.find((p) => p.deviceId === deviceId);
+      if (!r) return null;
+      return {
+        id: r.id,
+        deviceId: r.deviceId,
+        nickname: r.nickname,
+        avatar: r.avatar,
+        highScore: r.highScore,
+        totalScore: r.totalScore,
+        matchesPlayed: r.matchesPlayed,
+        winsCount: r.winsCount,
+        isBot: r.isBot,
+      };
+    }
+
     const db = this.ensureDb();
     const rows = await db
       .select()
@@ -334,6 +417,56 @@ class PostgresDatabase {
     avatar: AvatarId;
     isBot?: boolean;
   }): Promise<PlayerProfile> {
+    if (this.useLocalDb) {
+      const nowIso = new Date().toISOString();
+      const existing = this.localData.players.find((p) => p.deviceId === params.deviceId);
+      if (existing) {
+        existing.nickname = params.nickname;
+        existing.avatar = params.avatar;
+        existing.updatedAt = nowIso;
+        this.saveLocalStore();
+        return {
+          id: existing.id,
+          deviceId: existing.deviceId,
+          nickname: existing.nickname,
+          avatar: existing.avatar,
+          highScore: existing.highScore,
+          totalScore: existing.totalScore,
+          matchesPlayed: existing.matchesPlayed,
+          winsCount: existing.winsCount,
+          isBot: existing.isBot,
+        };
+      }
+
+      const inserted: LocalPlayerRow = {
+        id: crypto.randomUUID(),
+        deviceId: params.deviceId,
+        nickname: params.nickname,
+        avatar: params.avatar,
+        highScore: 0,
+        totalScore: 0,
+        matchesPlayed: 0,
+        winsCount: 0,
+        isBot: params.isBot ?? false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      this.localData.players.push(inserted);
+      this.saveLocalStore();
+
+      return {
+        id: inserted.id,
+        deviceId: inserted.deviceId,
+        nickname: inserted.nickname,
+        avatar: inserted.avatar,
+        highScore: inserted.highScore,
+        totalScore: inserted.totalScore,
+        matchesPlayed: inserted.matchesPlayed,
+        winsCount: inserted.winsCount,
+        isBot: inserted.isBot,
+      };
+    }
+
     const db = this.ensureDb();
     const now = new Date();
     const existing = await this.findPlayerByDeviceId(params.deviceId);
@@ -388,6 +521,34 @@ class PostgresDatabase {
     roundScore: number;
     isWinner: boolean;
   }): Promise<{ newHighScore: boolean; updatedProfile: PlayerProfile | null }> {
+    if (this.useLocalDb) {
+      const existing = this.localData.players.find((p) => p.deviceId === params.deviceId);
+      if (!existing) return { newHighScore: false, updatedProfile: null };
+
+      const isNewHigh = params.roundScore > existing.highScore;
+      existing.highScore = isNewHigh ? params.roundScore : existing.highScore;
+      existing.totalScore += params.roundScore;
+      existing.matchesPlayed += 1;
+      existing.winsCount += params.isWinner ? 1 : 0;
+      existing.updatedAt = new Date().toISOString();
+      this.saveLocalStore();
+
+      return {
+        newHighScore: isNewHigh,
+        updatedProfile: {
+          id: existing.id,
+          deviceId: existing.deviceId,
+          nickname: existing.nickname,
+          avatar: existing.avatar,
+          highScore: existing.highScore,
+          totalScore: existing.totalScore,
+          matchesPlayed: existing.matchesPlayed,
+          winsCount: existing.winsCount,
+          isBot: existing.isBot,
+        },
+      };
+    }
+
     const db = this.ensureDb();
     const now = new Date();
     const existing = await this.findPlayerByDeviceId(params.deviceId);
@@ -433,8 +594,21 @@ class PostgresDatabase {
     winnerPlayerId: string | null;
     results: unknown;
   }): Promise<void> {
-    const db = this.ensureDb();
     const resultsJson = JSON.stringify(params.results);
+    if (this.useLocalDb) {
+      this.localData.matches.push({
+        id: crypto.randomUUID(),
+        roomCode: params.roomCode,
+        challengeId: params.challengeId,
+        winnerPlayerId: params.winnerPlayerId,
+        resultsJson,
+        createdAt: new Date().toISOString(),
+      });
+      this.saveLocalStore();
+      return;
+    }
+
+    const db = this.ensureDb();
     const isUuid =
       params.winnerPlayerId &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -453,28 +627,58 @@ class PostgresDatabase {
   }
 
   public async getLeaderboards(limit = 100): Promise<LeaderboardsPayload> {
-    const db = this.ensureDb();
-    const rows = await db
-      .select()
-      .from(schema.players)
-      .where(eq(schema.players.isBot, false));
+    let rawPlayers: Array<{
+      id: string;
+      nickname: string;
+      avatar: AvatarId;
+      highScore: number;
+      winsCount: number;
+      matchesPlayed: number;
+      totalScore: number;
+      isBot: boolean;
+      updatedAt: string;
+    }> = [];
+    let totalMatchesCount = 0;
 
-    const rawPlayers = rows.map((r) => ({
-      id: r.id,
-      nickname: r.nickname,
-      avatar: r.avatar as AvatarId,
-      highScore: r.highScore,
-      winsCount: r.winsCount,
-      matchesPlayed: r.matchesPlayed,
-      totalScore: r.totalScore,
-      isBot: r.isBot,
-      updatedAt: r.updatedAt.toISOString(),
-    }));
+    if (this.useLocalDb) {
+      rawPlayers = this.localData.players
+        .filter((r) => !r.isBot)
+        .map((r) => ({
+          id: r.id,
+          nickname: r.nickname,
+          avatar: r.avatar,
+          highScore: r.highScore,
+          winsCount: r.winsCount,
+          matchesPlayed: r.matchesPlayed,
+          totalScore: r.totalScore,
+          isBot: r.isBot,
+          updatedAt: r.updatedAt,
+        }));
+      totalMatchesCount = this.localData.matches.length;
+    } else {
+      const db = this.ensureDb();
+      const rows = await db
+        .select()
+        .from(schema.players)
+        .where(eq(schema.players.isBot, false));
 
-    const matchCountRes = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.matches);
-    const totalMatchesCount = matchCountRes[0]?.count ?? 0;
+      rawPlayers = rows.map((r) => ({
+        id: r.id,
+        nickname: r.nickname,
+        avatar: r.avatar as AvatarId,
+        highScore: r.highScore,
+        winsCount: r.winsCount,
+        matchesPlayed: r.matchesPlayed,
+        totalScore: r.totalScore,
+        isBot: r.isBot,
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+
+      const matchCountRes = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.matches);
+      totalMatchesCount = matchCountRes[0]?.count ?? 0;
+    }
 
     // Filtra jogadoras que tenham pelo menos 1 partida ou score > 0 para o ranking
     const activePlayers = rawPlayers.filter((p) => p.matchesPlayed > 0 || p.highScore > 0);
@@ -536,4 +740,4 @@ class PostgresDatabase {
   }
 }
 
-export const database = new PostgresDatabase();
+export const database = new AppDatabase();

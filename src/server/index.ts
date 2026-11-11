@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: process.env.NODE_ENV !== 'production' });
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
