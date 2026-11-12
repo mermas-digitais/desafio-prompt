@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibleDialog } from '../AccessibleDialog';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, RectangleVertical, Share2, Sparkles, Square, X } from 'lucide-react';
 import { InstagramLogoIcon } from '../InstagramLogoIcon';
@@ -109,24 +110,10 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
   }, [data, themeId, format]);
 
   return (
-    <AnimatePresence>
+    <AccessibleDialog open={Boolean(isOpen && data)} title="Seu card para as redes" onClose={onClose}>
       {isOpen && data && (
-        <motion.div
-          key="share-studio"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[70] bg-[#1A0024]/80 backdrop-blur-sm flex items-end sm:items-center justify-center"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md max-h-[96vh] overflow-y-auto bg-[#FAF7FF] rounded-t-3xl sm:rounded-3xl border border-[#DDC7F8] shadow-2xl flex flex-col"
-          >
+        <div>
+          <div className="w-full flex flex-col">
             {/* Topo do Estúdio */}
             <div className="sticky top-0 z-10 bg-[#FAF7FF]/95 backdrop-blur px-4 pt-4 pb-3 flex items-center justify-between border-b border-[#F3E8FF]">
               <div>
@@ -310,9 +297,9 @@ export const PlayShareCardStudio: React.FC<PlayShareCardStudioProps> = ({
                 )}
               </AnimatePresence>
             </div>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
-    </AnimatePresence>
+    </AccessibleDialog>
   );
 };

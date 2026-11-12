@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, RotateCcw, Zap } from 'lucide-react';
+import { Lightbulb, Shield, Zap } from 'lucide-react';
+import { useSearch } from '@tanstack/react-router';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
 import { useNetworkConfig } from '../hooks/useNetworkConfig';
@@ -23,9 +24,10 @@ import { TVModerationModal } from '../components/tv/TVModerationModal';
 export const TVScreen: React.FC = () => {
   const roomState = useGameStore((s) => s.roomState);
   const phase = roomState.phase;
-  const initSocketConnection = useGameStore((s) => s.initSocketConnection);
   const joinSessionRoom = useGameStore((s) => s.joinSessionRoom);
-  const resetRoom = useGameStore((s) => s.resetRoom);
+  const search = useSearch({ strict: false }) as { room?: string };
+  const requestedCode = (search.room || 'MDX26').toUpperCase().trim();
+  const connectionError = useGameStore((s) => s.connectionError);
 
   const [isModerationOpen, setIsModerationOpen] = useState(false);
 
@@ -35,15 +37,8 @@ export const TVScreen: React.FC = () => {
   const hintUnlockBanner = useTVUiStore((s) => s.hintUnlockBanner);
 
   useEffect(() => {
-    initSocketConnection();
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const urlRoom = params.get('room');
-      if (urlRoom && urlRoom.toUpperCase() !== roomState.roomCode) {
-        joinSessionRoom(urlRoom.toUpperCase());
-      }
-    }
-  }, [initSocketConnection, joinSessionRoom, roomState.roomCode]);
+    joinSessionRoom(requestedCode);
+  }, [joinSessionRoom, requestedCode]);
 
   // Hooks modulares de URL local/produção, posicionamento persistente da rádio e coreografia sonora
   const { playUrl, playDisplayUrl } = useNetworkConfig();
@@ -75,17 +70,9 @@ export const TVScreen: React.FC = () => {
                   className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
                   aria-hidden="true"
                 />
-                <button
-                  type="button"
-                  onClick={() => resetRoom()}
-                  title="Voltar ao Ranking Geral"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] cursor-pointer transition-colors shadow-xs whitespace-nowrap"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-[#9747FF]" />
-                  <span className="hidden xl:inline">Reiniciar</span>
-                </button>
               </>
             )}
+            <button type="button" onClick={() => setIsModerationOpen(true)} className="min-h-11 px-3 py-2 rounded-xl bg-white border border-[#DDC7F8] text-sm inline-flex items-center gap-2"><Shield className="w-4 h-4" />Moderação · {requestedCode}</button>
           </div>
         }
       />
@@ -177,6 +164,7 @@ export const TVScreen: React.FC = () => {
 
       {/* Container Widescreen 100vh Travado (Sem Scroll, Sem Vazar pelo Bottom e Sem Piscar a Tela!) */}
       <main className="max-w-[1840px] w-full mx-auto px-5 lg:px-8 py-3 flex-1 min-h-0 overflow-hidden flex flex-col justify-between relative z-10">
+        {connectionError && <p role="alert" className="bg-red-50 text-red-800 p-3 rounded-xl">{connectionError}</p>}
         {phase === 'IDLE' && (
           <motion.div
             key="phase-idle"
@@ -224,7 +212,7 @@ export const TVScreen: React.FC = () => {
       <TVModerationModal
         isOpen={isModerationOpen}
         onClose={() => setIsModerationOpen(false)}
-        currentRoomCode={roomState.roomCode}
+        currentRoomCode={requestedCode}
       />
     </div>
   );

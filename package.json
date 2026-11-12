@@ -5,6 +5,8 @@
   "description": "Game Desafio de Prompt - Espaço de IA MDX STEAM 2026 (Mermãs Digitais)",
   "type": "module",
   "scripts": {
+    "test": "node --import tsx --experimental-test-module-mocks --test tests/*.test.ts",
+    "test:coverage": "node --import tsx --experimental-test-module-mocks --test --experimental-test-coverage tests/*.test.ts",
     "dev": "concurrently -k -n SERVER,WEB -c magenta,cyan \"npm run dev:server\" \"npm run dev:web\"",
     "dev:server": "tsx watch src/server/index.ts",
     "dev:web": "vite --host 0.0.0.0",

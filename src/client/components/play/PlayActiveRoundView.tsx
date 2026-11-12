@@ -19,11 +19,11 @@ import { useGameStore } from '../../store/useGameStore';
 import { evaluatePromptThermometer, formatTimer } from '../../helpers/formatters';
 import { resolveChallengeImageUrl } from '../../helpers/imageHelpers';
 import { AvatarBadge } from '../AvatarBadge';
-import { ALL_PLAYER_SLOTS, type RoomPlayer } from '../../../shared/types';
+import { ALL_PLAYER_SLOTS, type PublicRoomPlayer } from '../../../shared/types';
 
 export interface PlayActiveRoundViewProps {
   deviceId: string;
-  myRoomSlot: RoomPlayer;
+  myRoomSlot: PublicRoomPlayer;
   promptText: string;
   isLocked: boolean;
   onPromptChange: (val: string) => void;
@@ -68,7 +68,7 @@ export const PlayActiveRoundView: React.FC<PlayActiveRoundViewProps> = React.mem
         <div className="mermas-card px-2.5 py-2 grid grid-cols-5 gap-1.5">
           {ALL_PLAYER_SLOTS.map((slotNum) => {
             const p = players.find((pl) => pl.slot === slotNum);
-            const isMe = p?.deviceId === deviceId;
+            const isMe = p?.id === myRoomSlot.id;
             return (
               <div
                 key={slotNum}
@@ -193,6 +193,7 @@ export const PlayActiveRoundView: React.FC<PlayActiveRoundViewProps> = React.mem
           </div>
 
           <textarea
+            aria-label="Seu palpite para a imagem"
             rows={4}
             disabled={isLocked}
             value={promptText}

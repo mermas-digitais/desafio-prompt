@@ -11,12 +11,20 @@ export interface RoomListItem {
   playersCount: number;
   maxPlayers: number;
   roundToken: string;
+  moderatorId: string | null;
 }
 
 export class RoomManager {
   private io: SocketIOServer;
   private rooms = new Map<string, GameEngine>();
   private defaultRoomCode = 'MDX26';
+  private moderators = new Map<string, string | null>();
+  private creating = new Set<string>();
+  private readonly maxRooms = 100;
+
+  private validCode(code: string): boolean {
+    return /^[A-Z0-9_-]{1,12}$/.test(code);
+  }
 
   constructor(io: SocketIOServer) {
     this.io = io;
@@ -24,11 +32,11 @@ export class RoomManager {
 
   public async init(): Promise<void> {
     const storedRooms = await database.getRooms();
-    let hasDefault = false;
+    if (storedRooms.length > this.maxRooms) throw new Error('Limite de salas excedido.');
 
     for (const stored of storedRooms) {
       const code = stored.code.toUpperCase().trim();
-      if (code === this.defaultRoomCode) hasDefault = true;
+      if (!this.validCode(code)) throw new Error('Código de sala inválido no banco.');
 
       const engine = new GameEngine(
         this.io,
@@ -38,47 +46,14 @@ export class RoomManager {
       );
       await engine.start();
       this.rooms.set(code, engine);
+      this.moderators.set(code, stored.moderatorId ?? null);
     }
 
-    if (!hasDefault) {
-      const defaultEngine = new GameEngine(
-        this.io,
-        this.defaultRoomCode,
-        'Arena MDX Principal',
-        true
-      );
-      await defaultEngine.start();
-      this.rooms.set(this.defaultRoomCode, defaultEngine);
-      await database.upsertRoom(this.defaultRoomCode, 'Arena MDX Principal', true);
-    }
   }
 
   public getRoom(roomCode?: string): GameEngine | undefined {
     const code = (roomCode || this.defaultRoomCode).toUpperCase().trim();
     return this.rooms.get(code);
-  }
-
-  public getOrCreateRoom(
-    roomCode?: string,
-    name?: string,
-    isOpen = false
-  ): { engine: GameEngine; isNew: boolean } {
-    const code = (roomCode || this.defaultRoomCode).toUpperCase().trim();
-    let engine = this.rooms.get(code);
-    if (engine) {
-      if (name) {
-        engine.openRoom({ name });
-      }
-      return { engine, isNew: false };
-    }
-
-    const roomName = name || (code === this.defaultRoomCode ? 'Arena MDX Principal' : `Sala ${code}`);
-    engine = new GameEngine(this.io, code, roomName, isOpen);
-    engine.start().catch((err) => {
-      console.error(`❌ [RoomManager] Falha ao iniciar sala ${code}:`, err);
-    });
-    this.rooms.set(code, engine);
-    return { engine, isNew: true };
   }
 
   public async openRoom(params: {
@@ -87,9 +62,11 @@ export class RoomManager {
     password?: string;
   }): Promise<{ ok: boolean; state?: GameRoomState; error?: string }> {
     const code = (params.roomCode || this.defaultRoomCode).toUpperCase().trim();
-    const { engine } = this.getOrCreateRoom(code, params.name, true);
-    engine.openRoom({ name: params.name });
-    await database.upsertRoom(code, params.name, true);
+    const engine = this.getRoom(code);
+    if (!engine) return { ok: false, error: 'Sala não encontrada.' };
+    const name = params.name?.trim() || engine.getState().roomName;
+    await database.upsertRoom(code, name, true);
+    engine.openRoom({ name });
     return { ok: true, state: engine.getState() };
   }
 
@@ -97,8 +74,8 @@ export class RoomManager {
     const code = (roomCode || this.defaultRoomCode).toUpperCase().trim();
     const engine = this.getRoom(code);
     if (!engine) return { ok: false };
-    engine.closeRoom();
     await database.setRoomStatus(code, false);
+    engine.closeRoom();
     return { ok: true };
   }
 
@@ -106,17 +83,65 @@ export class RoomManager {
     roomCode: string;
     name: string;
     isOpen?: boolean;
-  }): Promise<{ ok: boolean; state: GameRoomState }> {
+    moderatorId: string;
+  }): Promise<{ ok: boolean; state?: GameRoomState; error?: string }> {
     const code = (params.roomCode || '').toUpperCase().trim();
     const name = (params.name || `Sala ${code}`).trim();
     const isOpen = typeof params.isOpen === 'boolean' ? params.isOpen : true;
 
-    const { engine } = this.getOrCreateRoom(code, name, isOpen);
-    if (isOpen) {
-      engine.openRoom({ name });
+    if (!this.validCode(code) || !params.moderatorId?.trim()) {
+      return { ok: false, error: 'Código de sala ou responsável inválido.' };
     }
-    await database.upsertRoom(code, name, isOpen);
-    return { ok: true, state: engine.getState() };
+    if (this.rooms.has(code) || this.creating.has(code)) {
+      return { ok: false, error: 'Esta sala já existe.' };
+    }
+    if (this.rooms.size + this.creating.size >= this.maxRooms) {
+      return { ok: false, error: 'Limite de salas atingido.' };
+    }
+    this.creating.add(code);
+    const engine = new GameEngine(this.io, code, name, isOpen);
+    try {
+      await database.createRoom(code, name, params.moderatorId);
+      if (!isOpen) await database.setRoomStatus(code, false);
+      await engine.start();
+      this.rooms.set(code, engine);
+      this.moderators.set(code, params.moderatorId);
+      return { ok: true, state: engine.getState() };
+    } catch (err) {
+      engine.dispose();
+      throw err;
+    } finally {
+      this.creating.delete(code);
+    }
+  }
+
+  public getModeratorId(roomCode: string): string | null {
+    return this.moderators.get(roomCode.toUpperCase().trim()) ?? null;
+  }
+
+  public async transferModeration(roomCode: string, moderatorId: string): Promise<{ ok: boolean }> {
+    const code = roomCode.toUpperCase().trim();
+    if (!this.rooms.has(code) || !moderatorId.trim()) return { ok: false };
+    const persisted = await database.setRoomModerator(code, moderatorId);
+    if (persisted === false) return { ok: false };
+    this.moderators.set(code, moderatorId);
+    return { ok: true };
+  }
+
+  public isEvaluatingRound(roomCode: string): boolean {
+    return this.getRoom(roomCode)?.isEvaluatingRound() ?? false;
+  }
+
+  public isCommittingRound(roomCode: string): boolean {
+    return this.getRoom(roomCode)?.isCommittingRound() ?? false;
+  }
+
+  public async refreshAllLeaderboards(): Promise<void> {
+    await Promise.all([...this.rooms.values()].map((engine) => engine.refreshLeaderboards()));
+  }
+
+  public dispose(): void {
+    for (const engine of this.rooms.values()) engine.dispose();
   }
 
   public listRooms(): RoomListItem[] {
@@ -131,6 +156,7 @@ export class RoomManager {
         playersCount: state.players.length,
         maxPlayers: 5,
         roundToken: state.roundToken,
+        moderatorId: this.getModeratorId(code),
       });
     }
     return list;

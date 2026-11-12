@@ -70,7 +70,7 @@ export const TVShowcaseGalleryBanner: React.FC = React.memo(() => {
                 aria-hidden="true"
                 className="font-prompt text-xs text-[#545454] truncate blur-[6px] select-none pointer-events-none"
               >
-                “{currentShowcase.samplePrompt}”
+                •••• •••••• •••• •••••• •••• •••••• ••••
               </p>
             </div>
           </div>

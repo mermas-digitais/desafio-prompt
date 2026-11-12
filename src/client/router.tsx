@@ -38,8 +38,9 @@ const tvRoute = createRoute({
 const playRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/play',
-  validateSearch: (search: Record<string, unknown>): { room?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { room?: string; round?: string } => ({
     room: typeof search.room === 'string' ? search.room : 'MDX26',
+    round: typeof search.round === 'string' ? search.round : undefined,
   }),
   component: PlayScreen,
 });

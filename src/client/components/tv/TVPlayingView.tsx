@@ -4,7 +4,6 @@ import {
   Clock,
   Crown,
   Eye,
-  Flame,
   Lock,
   Sparkles,
   Sprout,
@@ -12,7 +11,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
-import { formatTimer, getPromptWordCount } from '../../helpers/formatters';
+import { formatTimer } from '../../helpers/formatters';
 import { resolveChallengeImageUrl } from '../../helpers/imageHelpers';
 import { AvatarBadge } from '../AvatarBadge';
 import { BadgeVectorIcon } from '../BadgeVectorIcon';
@@ -143,7 +142,7 @@ export const TVPlayingView: React.FC = React.memo(() => {
                         : 'text-[#330043]/75'
                     }`}
                   >
-                    {token.text}
+                    {token.isRevealed ? token.text : '••••'}
                   </span>{' '}
                 </React.Fragment>
               ))}
@@ -188,8 +187,6 @@ export const TVPlayingView: React.FC = React.memo(() => {
       {/* ARENA COMPETITIVA DAS 5 PARTICIPANTES */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-2.5 shrink-0">
         {players.map((player) => {
-          const wordCount = getPromptWordCount(player.submittedPrompt);
-          const progressPct = Math.min(100, Math.round((wordCount / 18) * 100));
           const lockRank = lockOrderBySlot.get(player.slot);
           const potentialSpeedBonus = player.lockedAtRemainingSeconds
             ? Math.round((player.lockedAtRemainingSeconds / 90) * 150)
@@ -200,23 +197,8 @@ export const TVPlayingView: React.FC = React.memo(() => {
             matchesPlayed: player.matchesPlayed,
           });
 
-          const StageIcon =
-            wordCount === 0
-              ? Eye
-              : wordCount <= 5
-              ? Sprout
-              : wordCount <= 11
-              ? Zap
-              : Flame;
-
-          const stageLabel =
-            wordCount === 0
-              ? 'Analisando...'
-              : wordCount <= 5
-              ? `Rascunhando (${wordCount}p)`
-              : wordCount <= 11
-              ? `Detalhando (${wordCount}p)`
-              : `Completo! (${wordCount}p)`;
+          const StageIcon = player.isTyping ? Sprout : Eye;
+          const stageLabel = player.isTyping ? 'Escrevendo palpite…' : 'Observando a imagem…';
 
           return (
             <div
@@ -272,7 +254,7 @@ export const TVPlayingView: React.FC = React.memo(() => {
                     </span>
                     <div className="text-left min-w-0">
                       <div className="text-[10px] font-bold text-emerald-900 truncate">
-                        TRAVADO ({wordCount}p)
+                        PALPITE TRAVADO
                       </div>
                       <div className="text-[10px] text-emerald-700 truncate">
                         Restando {player.lockedAtRemainingSeconds ?? 0}s
@@ -292,15 +274,6 @@ export const TVPlayingView: React.FC = React.memo(() => {
                       <StageIcon className="w-3 h-3 text-[#9747FF] shrink-0" />
                       <span className="truncate">{stageLabel}</span>
                     </span>
-                    <span className="text-[10px] text-[#9747FF] font-semibold shrink-0">
-                      {progressPct}%
-                    </span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-[#FAF5FF] border border-[#E9D8FD] overflow-hidden">
-                    <div
-                      style={{ width: `${progressPct}%` }}
-                      className="h-full bg-gradient-to-r from-[#9747FF] via-[#FF4A97] to-[#FFCD34] rounded-full transition-all duration-300"
-                    />
                   </div>
                 </div>
               )}

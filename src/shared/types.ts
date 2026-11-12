@@ -58,6 +58,17 @@ export interface RoomPlayer {
   lockedAtRemainingSeconds: number | null;
 }
 
+export type PublicRoomPlayer = Omit<RoomPlayer, 'deviceId' | 'socketId' | 'submittedPrompt'>;
+
+export interface StaffUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'moderator';
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
 export interface ChallengePromptLayers {
   subject: string;       // Quem/O que e qual a ação principal
   style: string;         // Estilo artístico, técnica, estética
@@ -162,7 +173,7 @@ export interface GameRoomState {
   roundTimeLeft: number;        // 90s (1m30s) de partida
   countdownLeft: number;        // 3..2..1
   blurPx: number;               // Nível de blur atual do prompt original na TV
-  players: RoomPlayer[];        // Até 5 jogadores nos slots 1..5
+  players: PublicRoomPlayer[];  // Identificadores privados e rascunhos nunca são públicos
   challenge: ChallengePublicView | null;
   evaluations: PlayerRoundEvaluation[];
   currentRevealIndex: number;   // 0..4 durante a fase REVEALING (1 por 1)

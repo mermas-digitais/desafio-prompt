@@ -1,5 +1,6 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AccessibleDialog } from '../AccessibleDialog';
+import { motion } from 'framer-motion';
 import { ArrowLeft, Sparkles, X } from 'lucide-react';
 import { InstagramLogoIcon } from '../InstagramLogoIcon';
 import { PlayMobilePodium } from './PlayMobilePodium';
@@ -29,28 +30,14 @@ export const PlayMatchHistoryModal: React.FC<PlayMatchHistoryModalProps> = ({
   });
 
   return (
-    <AnimatePresence>
-      <motion.div
-        key="match-history-modal"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[65] bg-[#1A0024]/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: 50, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-md max-h-[92vh] overflow-y-auto bg-[#FAF7FF] rounded-t-3xl sm:rounded-3xl border border-[#DDC7F8] shadow-2xl flex flex-col"
-        >
+    <AccessibleDialog open={Boolean(match)} title={`Partida · ${match.roomCode}`} onClose={onClose}>
+        <div className="w-full flex flex-col">
           {/* Header Fixo do Histórico */}
           <div className="sticky top-0 z-10 bg-[#FAF7FF]/95 backdrop-blur px-4 pt-4 pb-3 flex items-center justify-between border-b border-[#F3E8FF]">
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                aria-label="Voltar ao lobby"
                 onClick={onClose}
                 className="w-8 h-8 rounded-xl bg-white border border-[#DDC7F8] flex items-center justify-center text-[#6E4F7D] cursor-pointer"
               >
@@ -143,8 +130,7 @@ export const PlayMatchHistoryModal: React.FC<PlayMatchHistoryModalProps> = ({
               Voltar ao Lobby
             </button>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+    </AccessibleDialog>
   );
 };

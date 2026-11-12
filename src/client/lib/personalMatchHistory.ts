@@ -1,8 +1,11 @@
 import type { PlayerRoundEvaluation } from '../../shared/types';
 import type { ShareCardData } from './shareCardRenderer';
+import { personalHistoryKey } from './sessionHelpers';
 
 export interface SavedPersonalMatch {
   id: string; // ex: "match-1731289123000"
+  roomCode: string;
+  roundId: string;
   timestamp: number; // Date.now()
   challenge: {
     id: string;
@@ -17,39 +20,38 @@ export interface SavedPersonalMatch {
   shareData: ShareCardData;
 }
 
-const STORAGE_PREFIX = 'mdx26_personal_match_history_';
 const MAX_HISTORY_ITEMS = 20;
 
-export function getPersonalMatchHistory(deviceId: string): SavedPersonalMatch[] {
-  if (typeof window === 'undefined' || !deviceId) return [];
+export function getPersonalMatchHistory(roomCode: string, profileId: string): SavedPersonalMatch[] {
+  if (typeof window === 'undefined' || !roomCode || !profileId) return [];
   try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${deviceId}`);
+    const raw = localStorage.getItem(personalHistoryKey(roomCode, profileId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed;
+    return parsed.filter((match) => match.roomCode === roomCode && match.myEvaluation?.playerId === profileId && match.roundId);
   } catch {
     return [];
   }
 }
 
-export function savePersonalMatch(deviceId: string, match: SavedPersonalMatch): void {
-  if (typeof window === 'undefined' || !deviceId || !match) return;
+export function savePersonalMatch(roomCode: string, profileId: string, match: SavedPersonalMatch): void {
+  if (typeof window === 'undefined' || !roomCode || !profileId || !match || match.roomCode !== roomCode || match.myEvaluation.playerId !== profileId) return;
   try {
-    const existing = getPersonalMatchHistory(deviceId);
+    const existing = getPersonalMatchHistory(roomCode, profileId);
     // Evita duplicar a mesma partida se já tiver salvo
     const filtered = existing.filter((m) => m.id !== match.id);
     const updated = [match, ...filtered].slice(0, MAX_HISTORY_ITEMS);
-    localStorage.setItem(`${STORAGE_PREFIX}${deviceId}`, JSON.stringify(updated));
+    localStorage.setItem(personalHistoryKey(roomCode, profileId), JSON.stringify(updated));
   } catch (err) {
     console.warn('⚠️ [PersonalMatchHistory] Não foi possível salvar partida no localStorage:', err);
   }
 }
 
-export function clearPersonalMatchHistory(deviceId: string): void {
-  if (typeof window === 'undefined' || !deviceId) return;
+export function clearPersonalMatchHistory(roomCode: string, profileId: string): void {
+  if (typeof window === 'undefined' || !roomCode || !profileId) return;
   try {
-    localStorage.removeItem(`${STORAGE_PREFIX}${deviceId}`);
+    localStorage.removeItem(personalHistoryKey(roomCode, profileId));
   } catch {
     // Ignora
   }

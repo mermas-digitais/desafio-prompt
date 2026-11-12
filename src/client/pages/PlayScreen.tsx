@@ -29,6 +29,8 @@ import type { PlayerRoundEvaluation } from '../../shared/types';
 import type { ShareCardAchievement, ShareCardData } from '../lib/shareCardRenderer';
 
 interface ActivePodiumSession {
+  roomCode: string;
+  profileId: string;
   matchId: string;
   evaluations: PlayerRoundEvaluation[];
   myEvaluation: PlayerRoundEvaluation;
@@ -43,11 +45,15 @@ export const PlayScreen: React.FC = () => {
   const currentRevealIndex = useGameStore((s) => s.roomState.currentRevealIndex);
   const challenge = useGameStore((s) => s.roomState.challenge);
   const roomName = useGameStore((s) => s.roomState.roomName);
+  const roundId = useGameStore((s) => s.roomState.roundId);
+  const roomIsOpen = useGameStore((s) => s.roomState.isOpen);
+  const connectionError = useGameStore((s) => s.connectionError);
   const kickedReason = useGameStore((s) => s.kickedReason);
   const setKickedReason = useGameStore((s) => s.setKickedReason);
   const setIsZoomOpen = usePlayerSessionStore((s) => s.setIsZoomOpen);
   const setIsRankingModalOpen = usePlayerSessionStore((s) => s.setIsRankingModalOpen);
   const [shareData, setShareData] = useState<ShareCardData | null>(null);
+  const [shareRoundId, setShareRoundId] = useState('');
   const [isShareStudioOpen, setIsShareStudioOpen] = useState(false);
 
   // Sessão local do Pódio no celular (permanece 60s mesmo que a TV volte para IDLE após 10s)
@@ -88,10 +94,9 @@ export const PlayScreen: React.FC = () => {
 
   // Carrega histórico pessoal de partidas gravadas no celular
   useEffect(() => {
-    if (deviceId) {
-      setPersonalHistory(getPersonalMatchHistory(deviceId));
-    }
-  }, [deviceId]);
+    setShareData(null); setShareRoundId(''); setIsShareStudioOpen(false); setActivePodiumSession(null); setSelectedHistoryMatch(null);
+    setPersonalHistory(profile?.roomCode === currentUrlRoom ? getPersonalMatchHistory(currentUrlRoom, profile.id) : []);
+  }, [currentUrlRoom, profile?.id]);
 
   // Captura um "snapshot" enriquecido do resultado para o card compartilhável.
   useEffect(() => {
@@ -137,16 +142,19 @@ export const PlayScreen: React.FC = () => {
       challengeImageUrl: challenge?.imageUrl || '',
       achievements: activeAchList,
     });
-  }, [phase, myEvaluation, evaluations, challenge, myPowerTier, myAchievements]);
+    setShareRoundId(roundId);
+  }, [phase, myEvaluation, evaluations, challenge, myPowerTier, myAchievements, roundId]);
 
   // Inicia sessão de pódio de 1 minuto no celular e grava no histórico
   useEffect(() => {
-    if (phase === 'PODIUM' && myEvaluation && evaluations.length > 0 && shareData) {
-      const matchId = `match-${challenge?.id || 'round'}-${myEvaluation.playerId}-${myEvaluation.totalScore}`;
+    if (phase === 'PODIUM' && myEvaluation && evaluations.length > 0 && shareData && roundId && shareRoundId === roundId && profile?.roomCode === currentUrlRoom) {
+      const matchId = roundId;
       setActivePodiumSession((prev) => {
         if (prev && prev.matchId === matchId) return prev;
         return {
           matchId,
+          roomCode: currentUrlRoom,
+          profileId: profile.id,
           evaluations: [...evaluations],
           myEvaluation,
           shareData,
@@ -159,6 +167,8 @@ export const PlayScreen: React.FC = () => {
       const myRank = Math.max(1, sorted.findIndex((ev) => ev.playerId === myEvaluation.playerId) + 1);
       const savedItem: SavedPersonalMatch = {
         id: matchId,
+        roomCode: currentUrlRoom,
+        roundId,
         timestamp: Date.now(),
         challenge: {
           id: challenge?.id || 'default',
@@ -172,10 +182,10 @@ export const PlayScreen: React.FC = () => {
         totalPlayers: evaluations.length,
         shareData,
       };
-      savePersonalMatch(deviceId, savedItem);
-      setPersonalHistory(getPersonalMatchHistory(deviceId));
+      savePersonalMatch(currentUrlRoom, profile.id, savedItem);
+      setPersonalHistory(getPersonalMatchHistory(currentUrlRoom, profile.id));
     }
-  }, [phase, myEvaluation, evaluations, shareData, challenge, deviceId]);
+  }, [phase, myEvaluation, evaluations, shareData, shareRoundId, challenge, currentUrlRoom, roundId, profile?.id]);
 
   // Contagem regressiva de 60 segundos no celular para permanência no pódio
   useEffect(() => {
@@ -200,10 +210,11 @@ export const PlayScreen: React.FC = () => {
   }, [phase]);
 
   // Define se o celular deve renderizar a visualização de pódio / resultado
-  const isShowingPodium = Boolean(activePodiumSession) || (phase === 'PODIUM' && Boolean(myEvaluation));
-  const activeEvals = activePodiumSession ? activePodiumSession.evaluations : evaluations;
-  const activeMyEval = activePodiumSession ? activePodiumSession.myEvaluation : myEvaluation;
-  const activeShare = activePodiumSession ? activePodiumSession.shareData : shareData;
+  const ownPodium = activePodiumSession?.roomCode === currentUrlRoom && activePodiumSession?.profileId === profile?.id ? activePodiumSession : null;
+  const isShowingPodium = Boolean(ownPodium) || (phase === 'PODIUM' && Boolean(myEvaluation));
+  const activeEvals = ownPodium ? ownPodium.evaluations : evaluations;
+  const activeMyEval = ownPodium ? ownPodium.myEvaluation : myEvaluation;
+  const activeShare = ownPodium ? ownPodium.shareData : shareRoundId === roundId ? shareData : null;
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-x-hidden pb-10">
@@ -228,6 +239,12 @@ export const PlayScreen: React.FC = () => {
       />
 
       <main className="flex-1 w-full max-w-md mx-auto px-4 pt-4 flex flex-col gap-4 relative z-10">
+        {connectionError && <p role="alert" className="mermas-card p-4 text-red-800">{connectionError}</p>}
+        {errorMsg && <p role="alert" className="mermas-card p-4 text-red-800">{errorMsg}</p>}
+        {!myRoomSlot && !roomIsOpen && <section className="mermas-card p-5 space-y-2"><h2 className="font-display text-xl">Entradas fechadas</h2><p>A sala {currentUrlRoom} não recebe novas participantes agora. Quem já entrou pode continuar a rodada. Aguarde a organização reabrir as entradas.</p></section>}
+        {!myRoomSlot && roomIsOpen && !currentUrlRound && <section className="mermas-card p-5 space-y-2"><h2 className="font-display text-xl">Escaneie o QR da rodada</h2><p>Abra o telão da sala {currentUrlRoom} e escaneie o QR atual para entrar. Este link não contém o código da rodada.</p></section>}
+        {!profile && <p className="text-sm text-[#6E4F7D]">Sua participação usa uma sessão privada neste navegador. Se o progresso antigo não aparecer, peça à organização a recuperação. Os dados e o histórico antigos foram preservados.</p>}
+        {deviceId && <details className="mermas-card p-4 text-sm"><summary className="cursor-pointer min-h-11">Recuperar progresso anterior</summary><p className="mb-3">Mostre este código à administração e peça a verificação do vínculo anterior. Não crie outro perfil nesta sala antes da recuperação. O código identifica este navegador; não substitui sua sessão privada.</p><label className="block">Código de recuperação<input className="mermas-input w-full px-3 py-2" value={deviceId} readOnly onFocus={(event) => event.target.select()} /></label><button className="min-h-11 px-3 mt-2 rounded-xl border border-[#DDC7F8]" onClick={() => { void navigator.clipboard?.writeText(deviceId).catch(() => setErrorMsg('Não foi possível copiar. Selecione o código e copie manualmente.')); }}>Copiar código</button></details>}
         {/* 0. CONTROLE SUPERIOR DE PERMANÊNCIA DO PÓDIO (60s + Voltar ao Lobby) */}
         {isShowingPodium && activePodiumSession && (
           <motion.div
@@ -373,7 +390,7 @@ export const PlayScreen: React.FC = () => {
         )}
 
         {/* QR CODE EXPIRADO (QUANDO A RODADA JÁ ENCERROU OU QR É ANTIGO) */}
-        {!isShowingPodium && isExpiredQr && !myRoomSlot && (
+        {!isShowingPodium && isExpiredQr && !myRoomSlot && roomIsOpen && (
           <PlayExpiredQrView
             roomName={roomName}
             roomCode={currentUrlRoom}
@@ -384,11 +401,10 @@ export const PlayScreen: React.FC = () => {
             expiredRoundData={expiredRoundData}
             onRefreshCheck={() => window.location.reload()}
             onViewPodium={
-              expiredRoundData
+              expiredRoundData && profile && expiredRoundData.evaluations.some((evaluation) => evaluation.playerId === profile.id)
                 ? () => {
                     const myEv =
-                      expiredRoundData.evaluations.find((e) => e.playerId === deviceId) ||
-                      expiredRoundData.evaluations[0];
+                      expiredRoundData.evaluations.find((e) => e.playerId === profile.id);
                     if (myEv) {
                       const sorted = [...expiredRoundData.evaluations].sort(
                         (a, b) => b.totalScore - a.totalScore
@@ -419,6 +435,8 @@ export const PlayScreen: React.FC = () => {
                       };
                       setSelectedHistoryMatch({
                         id: expiredRoundData.roundId,
+                        roomCode: currentUrlRoom,
+                        roundId: expiredRoundData.roundId,
                         timestamp: new Date(expiredRoundData.finishedAt).getTime() || Date.now(),
                         challenge: {
                           id: expiredRoundData.roundId,
@@ -439,7 +457,7 @@ export const PlayScreen: React.FC = () => {
         )}
 
         {/* ENTRADA / PERFIL DO JOGADOR (QUANDO QR VÁLIDO E NÃO ESTIVER NA SALA) */}
-        {!isShowingPodium && !isExpiredQr && (!myRoomSlot || isEditingProfile) && phase !== 'REVEALING' && (
+        {!isShowingPodium && !isExpiredQr && (Boolean(myRoomSlot) || (roomIsOpen && Boolean(currentUrlRound))) && (!myRoomSlot || isEditingProfile) && phase !== 'REVEALING' && (
           <PlayProfileCard
             profile={profile}
             nickname={nickname}
@@ -520,7 +538,7 @@ export const PlayScreen: React.FC = () => {
         {/* 📜 HISTÓRICO DE ÚLTIMAS PARTIDAS NO LOBBY (ABAIXO DO CARD DO USUÁRIO) */}
         {!isShowingPodium && phase !== 'REVEALING' && phase !== 'COUNTDOWN' && phase !== 'PLAYING' && (
           <PlayPersonalMatchHistory
-            history={personalHistory}
+            history={personalHistory.filter((match) => match.roomCode === currentUrlRoom && match.myEvaluation.playerId === profile?.id)}
             onSelectMatch={setSelectedHistoryMatch}
           />
         )}
@@ -529,7 +547,7 @@ export const PlayScreen: React.FC = () => {
       <PlayImageZoomModal />
       <PlayRankingModal />
       <PlayMatchHistoryModal
-        match={selectedHistoryMatch}
+        match={selectedHistoryMatch?.roomCode === currentUrlRoom && selectedHistoryMatch?.myEvaluation.playerId === profile?.id ? selectedHistoryMatch : null}
         onClose={() => setSelectedHistoryMatch(null)}
         onOpenShareCard={(data) => {
           setShareData(data);
@@ -544,4 +562,3 @@ export const PlayScreen: React.FC = () => {
     </div>
   );
 };
-

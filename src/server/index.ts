@@ -1,898 +1,356 @@
 import dotenv from 'dotenv';
-dotenv.config({ override: process.env.NODE_ENV !== 'production' });
+dotenv.config({ path: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test' ? '.env' : ['.env', '.env.local'], override: process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test' });
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { Server as SocketIOServer } from 'socket.io';
+import { z } from 'zod';
 import { database } from './db/index.js';
 import { validateNickname } from './moderation/profanityFilter.js';
-import { GameEngine } from './game/GameEngine.js';
 import { RoomManager } from './game/RoomManager.js';
-import type { AvatarId, PlayerSlot } from '../shared/types.js';
+import { AuthService, HttpError, requestError } from './auth.js';
+import { registerMusicRoutes } from './musicRoutes.js';
+import type { StaffUser } from '../shared/types.js';
 
-const PORT = Number(process.env.PORT || 3001);
-const HOST = process.env.HOST || '0.0.0.0';
+const roomCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{1,12}$/);
+const roomInput = z.object({ roomCode: roomCodeSchema });
+const roomQuery = z.object({ room: roomCodeSchema.optional() });
+const avatarSchema = z.string().max(300000).refine((s) => ['menina-mdx', 'ia', 'robo', 'game', 'codigo', 'lampada', 'ciencia', 'selo'].includes(s) || /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s), 'Avatar inválido.');
 
-function getLanIpAddresses(): { primaryIp: string; allIps: string[] } {
-  const nets = os.networkInterfaces();
-  const candidates: { ip: string; score: number }[] = [];
-
-  for (const [name, interfaces] of Object.entries(nets)) {
-    if (!interfaces) continue;
-    for (const net of interfaces) {
-      if (net.family === 'IPv4' && !net.internal) {
-        const ip = net.address;
-        if (ip.startsWith('169.254.')) continue;
-        let score = 10;
-        const lowerName = name.toLowerCase();
-        if (lowerName.includes('wi-fi') || lowerName.includes('wlan') || lowerName.includes('wireless')) {
-          score += 40;
-        } else if (lowerName.includes('ethernet') || lowerName.includes('eth') || lowerName.includes('en0')) {
-          score += 20;
-        }
-        // Evita priorizar adaptadores virtuais (VirtualBox 192.168.56.x, Hotspot 192.168.137.x, WSL, Docker)
-        if (
-          ip.startsWith('192.168.56.') ||
-          ip.startsWith('192.168.137.') ||
-          lowerName.includes('vethernet') ||
-          lowerName.includes('wsl') ||
-          lowerName.includes('vbox') ||
-          lowerName.includes('vmware') ||
-          lowerName.includes('conexão local*') ||
-          lowerName.includes('local area connection*')
-        ) {
-          score -= 35;
-        }
-        candidates.push({ ip, score });
-      }
+function getLanAddresses(): { primaryIp: string; allIps: string[] } {
+  const candidates: Array<{ ip: string; score: number }> = [];
+  for (const [name, interfaces] of Object.entries(os.networkInterfaces())) {
+    for (const net of interfaces || []) {
+      if (net.family !== 'IPv4' || net.internal || net.address.startsWith('169.254.')) continue;
+      let score = /wi-fi|wlan|wireless/i.test(name) ? 50 : /ethernet|eth|en0/i.test(name) ? 30 : 10;
+      if (/vethernet|wsl|vbox|vmware|conexão local\*|local area connection\*/i.test(name) || /^192\.168\.(56|137)\./.test(net.address)) score -= 35;
+      candidates.push({ ip: net.address, score });
     }
   }
-
   candidates.sort((a, b) => b.score - a.score);
-  const allIps = candidates.map((c) => c.ip);
-  return {
-    primaryIp: allIps[0] || 'localhost',
-    allIps,
-  };
+  return { primaryIp: candidates[0]?.ip || 'localhost', allIps: candidates.map((c) => c.ip) };
 }
 
-async function bootstrap() {
+export async function createApplication() {
+  if (process.env.NODE_ENV === 'production' && (process.env.SESSION_SECRET || '').trim().length < 32) throw new Error('Configure SESSION_SECRET antes de iniciar a aplicação em produção.');
   await database.init();
-
-  const fastify = Fastify({
-    logger: false,
+  const auth = new AuthService();
+  await auth.init();
+  const fastify = Fastify({ logger: false, bodyLimit: 512000 });
+  fastify.setErrorHandler((error, _req, reply) => {
+    const result = requestError(error);
+    if (result.statusCode === 500) console.error('[API] Falha interna:', error);
+    reply.code(result.statusCode).send({ ok: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
   });
-
   await fastify.register(cors, {
-    origin: true,
+    origin: false,
     credentials: true,
   });
-
+  auth.registerRoutes(fastify);
   const io = new SocketIOServer(fastify.server, {
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST'],
-    },
+    maxHttpBufferSize: 512000,
     transports: ['websocket', 'polling'],
+    allowRequest: (req, cb) => cb(null, auth.originAllowed(req.headers.origin, req.headers.host)),
+    cors: { origin: process.env.PUBLIC_APP_URL || false, credentials: true },
   });
-
   const roomManager = new RoomManager(io);
   await roomManager.init();
 
-  const getEngine = (roomCode?: string): GameEngine => {
-    return roomManager.getOrCreateRoom(roomCode).engine;
+  const getEngine = (raw?: string) => {
+    const code = roomCodeSchema.parse(raw || 'MDX26');
+    const engine = roomManager.getRoom(code);
+    if (!engine) throw new HttpError(404, 'Esta sala não existe. Abra uma sala disponível na página inicial.');
+    return engine;
   };
-
-  // ============================================================================
-  // REST API Endpoints
-  // ============================================================================
+  const authorizeRoom = async (headers: { cookie?: string }, raw: string): Promise<StaffUser> => {
+    const user = await auth.requireUser(headers);
+    const code = roomCodeSchema.parse(raw);
+    getEngine(code);
+    if (user.role !== 'admin' && roomManager.getModeratorId(code) !== user.id) throw new HttpError(403, 'Somente o moderador responsável pode controlar esta sala.');
+    return user;
+  };
+  const roomsUpdated = () => io.emit('rooms:updated', roomManager.listRooms());
+  const refreshRooms = async () => {
+    for (const room of roomManager.listRooms()) await getEngine(room.roomCode).refreshLeaderboards();
+    roomsUpdated();
+  };
+  const cancelRooms = (code?: string) => {
+    const affected = roomManager.listRooms().filter((room) => !code || room.roomCode === code);
+    if (affected.some((room) => roomManager.isCommittingRound(room.roomCode))) throw new HttpError(409, 'Aguarde a gravação do resultado antes de reiniciar ou fazer manutenção.');
+    for (const room of affected) getEngine(room.roomCode).resetToIdle();
+  };
 
   fastify.get<{ Querystring: { room?: string } }>('/api/health', async (req) => {
-    const engine = getEngine(req.query?.room);
-    return {
-      status: 'ok',
-      service: 'desafio-prompt-mdx26',
-      database: database.getDatabaseVersion(),
-      spotifyPlaylistUrl:
-        process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '',
-      aiProviders: {
-        openaiConfigured: Boolean(
-          process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'sua-chave-aqui'
-        ),
-        groqConfigured: Boolean(
-          process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'sua-chave-aqui'
-        ),
-        localFallback: true,
-      },
-      roomPhase: engine.getState().phase,
-      roomCode: engine.getState().roomCode,
-      roomName: engine.getState().roomName,
-      isOpen: engine.getState().isOpen,
-      timestamp: new Date().toISOString(),
-    };
+    const engine = getEngine(roomQuery.parse(req.query).room);
+    const state = engine.getState();
+    return { status: 'ok', service: 'desafio-prompt-mdx26', database: database.getDatabaseVersion(), spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', aiProviders: { openaiConfigured: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'sua-chave-aqui'), groqConfigured: Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'sua-chave-aqui'), localFallback: true }, roomPhase: state.phase, roomCode: state.roomCode, roomName: state.roomName, isOpen: state.isOpen, timestamp: new Date().toISOString() };
   });
-
   fastify.get<{ Querystring: { room?: string } }>('/api/config', async (req) => {
     const isProd = process.env.NODE_ENV === 'production';
-    const { primaryIp, allIps } = getLanIpAddresses();
-    const rawPublicUrl = (
-      process.env.PUBLIC_APP_URL ||
-      process.env.VITE_PUBLIC_APP_URL ||
-      (isProd ? 'https://dprompt.mermasdigitais.com.br' : '')
-    ).trim();
-    const isRawIpOrLocal =
-      /localhost|127\.0\.0\.1|0\.0\.0\.0|^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/|$)/i.test(
-        rawPublicUrl
-      );
-    const publicAppUrl =
-      rawPublicUrl && !isRawIpOrLocal
-        ? rawPublicUrl.replace(/\/+$/, '')
-        : isProd
-        ? 'https://dprompt.mermasdigitais.com.br'
-        : '';
-
-    const engine = getEngine(req.query?.room);
-    const roomState = engine.getState();
-
-    return {
-      spotifyPlaylistUrl:
-        process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '',
-      roomCode: roomState.roomCode,
-      roomName: roomState.roomName,
-      isOpen: roomState.isOpen,
-      roundToken: roomState.roundToken,
-      lanIp: isProd ? '' : primaryIp,
-      allLanIps: isProd ? [] : allIps,
-      publicAppUrl,
-    };
+    const { primaryIp, allIps } = getLanAddresses();
+    const raw = (process.env.PUBLIC_APP_URL || process.env.VITE_PUBLIC_APP_URL || (isProd ? 'https://dprompt.mermasdigitais.com.br' : '')).trim();
+    const validPublic = raw && !/localhost|127\.0\.0\.1|0\.0\.0\.0|^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/|$)/i.test(raw);
+    const state = getEngine(roomQuery.parse(req.query).room).getState();
+    return { spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', roomCode: state.roomCode, roomName: state.roomName, isOpen: state.isOpen, roundToken: state.roundToken, lanIp: isProd ? '' : primaryIp, allLanIps: isProd ? [] : allIps, publicAppUrl: validPublic ? raw.replace(/\/+$/, '') : isProd ? 'https://dprompt.mermasdigitais.com.br' : '' };
   });
+  registerMusicRoutes(fastify);
 
-  const spotifyCache = new Map<
-    string,
-    {
-      playlistTitle: string;
-      coverUrl: string;
-      tracks: Array<{
-        uri: string;
-        title: string;
-        subtitle: string;
-        duration: number;
-        previewUrl: string;
-      }>;
-      fetchedAt: number;
-    }
-  >();
-
-  const youtubeTrackCache = new Map<string, string[]>();
-
-  fastify.get<{ Querystring: { url?: string } }>('/api/spotify-playlist', async (req) => {
-    const rawUrl = (
-      req.query?.url ||
-      process.env.SPOTIFY_PLAYLIST_URL ||
-      process.env.VITE_SPOTIFY_PLAYLIST_URL ||
-      'https://open.spotify.com/playlist/4uYdic4V50S6NQEEFYkW63'
-    ).trim();
-
-    let entityType = 'playlist';
-    let entityId = '4uYdic4V50S6NQEEFYkW63';
-
-    const uriMatch = rawUrl.match(/^spotify:(playlist|album|track|artist):([a-zA-Z0-9]+)/i);
-    const urlMatch = rawUrl.match(
-      /open\.spotify\.com\/(?:embed\/)?(?:intl-[a-zA-Z-]+\/)?(playlist|album|track|artist)\/([a-zA-Z0-9]+)/i
-    );
-
-    if (uriMatch) {
-      entityType = uriMatch[1].toLowerCase();
-      entityId = uriMatch[2];
-    } else if (urlMatch) {
-      entityType = urlMatch[1].toLowerCase();
-      entityId = urlMatch[2];
-    }
-
-    const cacheKey = `${entityType}:${entityId}`;
-    const cached = spotifyCache.get(cacheKey);
-    if (cached && Date.now() - cached.fetchedAt < 1000 * 60 * 30) {
-      return {
-        ok: true,
-        entityUri: `spotify:${entityType}:${entityId}`,
-        playlistTitle: cached.playlistTitle,
-        coverUrl: cached.coverUrl,
-        tracks: cached.tracks,
-      };
-    }
-
-    try {
-      const embedPageUrl = `https://open.spotify.com/embed/${entityType}/${entityId}`;
-      const response = await fetch(embedPageUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        },
-      });
-      const html = await response.text();
-      const idx = html.indexOf('__NEXT_DATA__');
-      if (idx !== -1) {
-        const startJson = html.indexOf('>', idx) + 1;
-        const endJson = html.indexOf('</script>', startJson);
-        if (startJson > 0 && endJson > startJson) {
-          const parsed = JSON.parse(html.slice(startJson, endJson));
-          const entity = parsed?.props?.pageProps?.state?.data?.entity;
-          const playlistTitle = entity?.title || entity?.name || 'Trilha Sonora MDX';
-          const images: Array<{ url?: string }> = Array.isArray(entity?.visualIdentity?.image)
-            ? entity.visualIdentity.image
-            : [];
-          const coverUrl =
-            images[1]?.url || images[0]?.url || images[images.length - 1]?.url || '';
-
-          const rawTracks: Array<{
-            uri?: string;
-            title?: string;
-            subtitle?: string;
-            duration?: number;
-            isPlayable?: boolean;
-            audioPreview?: { url?: string };
-          }> = Array.isArray(entity?.trackList) ? entity.trackList : [];
-
-          const tracks = rawTracks
-            .filter((t) => Boolean(t?.uri) && t.isPlayable !== false)
-            .map((t) => ({
-              uri: String(t.uri),
-              title: String(t.title || 'Faixa'),
-              subtitle: String(t.subtitle || ''),
-              duration: Number(t.duration || 0),
-              previewUrl: String(t.audioPreview?.url || ''),
-            }));
-
-          if (tracks.length > 0) {
-            spotifyCache.set(cacheKey, {
-              playlistTitle,
-              coverUrl,
-              tracks,
-              fetchedAt: Date.now(),
-            });
-            return {
-              ok: true,
-              entityUri: `spotify:${entityType}:${entityId}`,
-              playlistTitle,
-              coverUrl,
-              tracks,
-            };
-          }
-        }
-      }
-    } catch {
-      // Fallback caso offline ou bloqueio de rede
-    }
-
-    return {
-      ok: false,
-      entityUri: `spotify:${entityType}:${entityId}`,
-      playlistTitle: 'Trilha Sonora MDX',
-      coverUrl: '',
-      tracks: [],
-    };
+  fastify.get<{ Querystring: { room?: string } }>('/api/admin/ranking', async (req) => {
+    const user = await auth.requireUser(req.headers);
+    const target = roomQuery.parse(req.query).room;
+    if (target) await authorizeRoom(req.headers, target);
+    else if (user.role !== 'admin') throw new HttpError(403, 'Selecione uma sala sob sua moderação.');
+    const [players, leaderboards] = await Promise.all([database.getAllPlayersForAdmin(target), database.getLeaderboards(100, target)]);
+    return { ok: true, database: database.getDatabaseVersion(), roomCode: target || 'ALL', players: players.map(({ deviceId: _device, ...p }) => p), stats: leaderboards.stats };
   });
-
-  // Resolve o ID de áudio completo no YouTube para tocar a faixa inteira sem o banner de 30s do Spotify
-  fastify.get<{ Querystring: { q?: string } }>('/api/spotify-track-video', async (req) => {
-    const query = (req.query?.q || '').trim();
-    if (!query) {
-      return { ok: false, videoIds: [] };
-    }
-
-    const cached = youtubeTrackCache.get(query.toLowerCase());
-    if (cached && cached.length > 0) {
-      return { ok: true, videoIds: cached };
-    }
-
-    try {
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(
-        `${query} official audio`
-      )}`;
-      const res = await fetch(searchUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
-        },
-      });
-      const html = await res.text();
-      const matches = [...html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)].map((m) => m[1]);
-      const uniqueIds = [...new Set(matches)].slice(0, 4);
-      if (uniqueIds.length > 0) {
-        youtubeTrackCache.set(query.toLowerCase(), uniqueIds);
-        return { ok: true, videoIds: uniqueIds };
-      }
-    } catch {
-      // Ignora se sem internet externa
-    }
-
-    return { ok: false, videoIds: [] };
+  fastify.post('/api/admin/clear-ranking', async (req) => {
+    const input = z.object({ roomCode: roomCodeSchema.optional(), confirm: z.literal(true) }).parse(req.body);
+    if (input.roomCode) await authorizeRoom(req.headers, input.roomCode);
+    else await auth.requireAdmin(req.headers);
+    cancelRooms(input.roomCode);
+    await database.clearAllRankings(input.roomCode);
+    await refreshRooms();
+    const [players, leaderboards] = await Promise.all([database.getAllPlayersForAdmin(input.roomCode), database.getLeaderboards(100, input.roomCode)]);
+    return { ok: true, roomCode: input.roomCode || 'ALL', players: players.map(({ deviceId: _device, ...p }) => p), stats: leaderboards.stats };
   });
-
-  // ============================================================================
-  // Rotas de Administração Protegidas por Senha (ADMIN_PASSWORD no .env)
-  // ============================================================================
-
-  const verifyAdminPassword = (provided?: string): boolean => {
-    const expected = (process.env.ADMIN_PASSWORD || 'mdx2026').trim();
-    return Boolean(provided && provided.trim() === expected);
-  };
-
-  fastify.post<{ Body: { password?: string } }>('/api/admin/login', async (req, reply) => {
-    const isValid = verifyAdminPassword(req.body?.password);
-    if (!isValid) {
-      return reply.code(401).send({ ok: false, error: 'Senha administrativa incorreta.' });
-    }
-    return {
-      ok: true,
-      database: database.getDatabaseVersion(),
-    };
+  fastify.delete<{ Params: { id: string }; Querystring: { room?: string; confirm?: string } }>('/api/admin/players/:id', async (req) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const target = roomQuery.parse(req.query).room;
+    if (req.query.confirm !== 'true') throw new HttpError(400, 'Confirme a exclusão do participante.');
+    const user = await auth.requireUser(req.headers);
+    if (!target && user.role !== 'admin') throw new HttpError(403, 'Selecione explicitamente uma sala sob sua moderação.');
+    const all = await database.getAllPlayersForAdmin(target);
+    const player = all.find((p) => p.id === id);
+    if (!player) throw new HttpError(404, 'Participante não encontrado nesta sala.');
+    if (user.role !== 'admin') await authorizeRoom(req.headers, player.roomCode);
+    cancelRooms(player.roomCode);
+    const deleted = await database.deletePlayerById(id);
+    await refreshRooms();
+    const [players, leaderboards] = await Promise.all([database.getAllPlayersForAdmin(target), database.getLeaderboards(100, target)]);
+    return { ok: deleted, players: players.map(({ deviceId: _device, ...p }) => p), stats: leaderboards.stats };
   });
-
-  fastify.get<{ Querystring: { room?: string } }>('/api/admin/ranking', async (req, reply) => {
-    const headerPwd = req.headers['x-admin-password'] as string | undefined;
-    if (!verifyAdminPassword(headerPwd)) {
-      return reply.code(401).send({ ok: false, error: 'Não autorizado.' });
-    }
-
-    const targetRoom = req.query?.room ? req.query.room.toUpperCase().trim() : undefined;
-    const [players, leaderboards] = await Promise.all([
-      database.getAllPlayersForAdmin(targetRoom),
-      database.getLeaderboards(50, targetRoom),
-    ]);
-
-    return {
-      ok: true,
-      database: database.getDatabaseVersion(),
-      roomCode: targetRoom || 'ALL',
-      players,
-      stats: leaderboards.stats,
-    };
-  });
-
-  fastify.post<{ Body: { roomCode?: string } }>('/api/admin/clear-ranking', async (req, reply) => {
-    const headerPwd = req.headers['x-admin-password'] as string | undefined;
-    if (!verifyAdminPassword(headerPwd)) {
-      return reply.code(401).send({ ok: false, error: 'Não autorizado.' });
-    }
-
-    const targetRoom = req.body?.roomCode ? req.body.roomCode.toUpperCase().trim() : undefined;
-    await database.clearAllRankings(targetRoom);
-    await getEngine(targetRoom).refreshLeaderboards();
-
-    const [players, leaderboards] = await Promise.all([
-      database.getAllPlayersForAdmin(targetRoom),
-      database.getLeaderboards(50, targetRoom),
-    ]);
-
-    return {
-      ok: true,
-      roomCode: targetRoom || 'ALL',
-      players,
-      stats: leaderboards.stats,
-    };
-  });
-
-  fastify.delete<{ Params: { id: string } }>('/api/admin/players/:id', async (req, reply) => {
-    const headerPwd = req.headers['x-admin-password'] as string | undefined;
-    if (!verifyAdminPassword(headerPwd)) {
-      return reply.code(401).send({ ok: false, error: 'Não autorizado.' });
-    }
-
-    const deleted = await database.deletePlayerById(req.params.id);
-    await getEngine().refreshLeaderboards();
-
-    const [players, leaderboards] = await Promise.all([
-      database.getAllPlayersForAdmin(),
-      database.getLeaderboards(50),
-    ]);
-
-    return {
-      ok: deleted,
-      players,
-      stats: leaderboards.stats,
-    };
-  });
-
-  fastify.get<{ Querystring: { room?: string } }>('/api/leaderboards', async (req) => {
-    return await database.getLeaderboards(100, req.query?.room);
-  });
-
-  fastify.get<{ Querystring: { room?: string } }>('/api/state', async (req) => {
-    return getEngine(req.query?.room).getState();
-  });
-
-  fastify.get('/api/rooms', async () => {
-    return { ok: true, rooms: roomManager.listRooms() };
-  });
-
-  fastify.get('/api/metrics/global', async () => {
-    const stats = await database.getGlobalStats();
-    return { ok: true, stats };
-  });
-
-  fastify.post<{
-    Body: { roomCode?: string; name: string; password?: string };
-  }>('/api/rooms/open', async (req, reply) => {
-    const { roomCode = 'MDX26', name, password } = req.body || {};
-    if (!verifyAdminPassword(password)) {
-      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
-    }
-    const outcome = await roomManager.openRoom({ roomCode, name, password });
-    io.emit('rooms:updated', roomManager.listRooms());
-    return { ok: true, state: outcome.state };
-  });
-
-  fastify.post<{
-    Body: { roomCode: string; password?: string };
-  }>('/api/rooms/close', async (req, reply) => {
-    const { roomCode, password } = req.body || {};
-    if (!verifyAdminPassword(password)) {
-      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
-    }
-    await roomManager.closeRoom(roomCode);
-    io.emit('rooms:updated', roomManager.listRooms());
+  fastify.post<{ Params: { id: string } }>('/api/admin/players/:id/rebind', async (req) => {
+    await auth.requireAdmin(req.headers);
+    const id = z.string().uuid().parse(req.params.id);
+    const input = roomInput.extend({ deviceId: z.string().regex(/^player-[0-9a-f-]{36}$/), confirm: z.literal(true) }).parse(req.body);
+    getEngine(input.roomCode);
+    const target = (await database.getAllPlayersForAdmin(input.roomCode)).find((p) => p.id === id);
+    if (!target) throw new HttpError(404, 'Perfil não encontrado nesta sala.');
+    if (getEngine(input.roomCode).getState().phase !== 'IDLE') throw new HttpError(409, 'Aguarde o fim da rodada para recuperar este perfil.');
+    const recovered = await database.rebindPlayerDeviceId(id, input.roomCode, input.deviceId);
+    if (!recovered) throw new HttpError(409, 'O dispositivo já possui outro perfil nesta sala. Nenhuma conta foi mesclada.');
+    await refreshRooms();
     return { ok: true };
   });
+  fastify.get<{ Querystring: { room?: string } }>('/api/leaderboards', async (req) => {
+    const room = roomQuery.parse(req.query).room;
+    if (room) getEngine(room);
+    return database.getLeaderboards(100, room);
+  });
+  fastify.get<{ Querystring: { room?: string } }>('/api/state', async (req) => getEngine(roomQuery.parse(req.query).room).getState());
+  fastify.get('/api/rooms', async () => ({ ok: true, rooms: roomManager.listRooms() }));
+  fastify.get('/api/metrics/global', async () => ({ ok: true, stats: await database.getGlobalStats() }));
 
-  fastify.post<{
-    Body: { roomCode: string; name: string; password?: string };
-  }>('/api/rooms/create', async (req, reply) => {
-    const { roomCode, name, password } = req.body || {};
-    if (!verifyAdminPassword(password)) {
-      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
+  fastify.post('/api/rooms/create', async (req, reply) => {
+    const user = await auth.requireUser(req.headers);
+    const input = roomInput.extend({ name: z.string().trim().min(2).max(120) }).parse(req.body);
+    if (roomManager.getRoom(input.roomCode)) throw new HttpError(409, 'Este código já pertence a outra sala.');
+    const result = await roomManager.createRoom({ ...input, moderatorId: user.id });
+    if (!result.ok) throw new HttpError(409, result.error || 'Não foi possível criar esta sala.');
+    roomsUpdated();
+    reply.code(201);
+    return result;
+  });
+  fastify.post('/api/rooms/open', async (req) => {
+    const input = roomInput.extend({ name: z.string().trim().min(2).max(120).optional() }).parse(req.body);
+    await authorizeRoom(req.headers, input.roomCode);
+    const result = await roomManager.openRoom({ roomCode: input.roomCode, name: input.name || getEngine(input.roomCode).getState().roomName });
+    roomsUpdated();
+    return result;
+  });
+  fastify.post('/api/rooms/close', async (req) => {
+    const input = roomInput.parse(req.body);
+    await authorizeRoom(req.headers, input.roomCode);
+    await roomManager.closeRoom(input.roomCode);
+    roomsUpdated();
+    return { ok: true, state: getEngine(input.roomCode).getState() };
+  });
+  fastify.post('/api/rooms/transfer', async (req) => {
+    const input = roomInput.extend({ moderatorId: z.string().uuid() }).parse(req.body);
+    await authorizeRoom(req.headers, input.roomCode);
+    if (!await database.findStaffUserById(input.moderatorId)) throw new HttpError(404, 'Operador não encontrado.');
+    const result = await roomManager.transferModeration(input.roomCode, input.moderatorId);
+    if (!result.ok) throw new HttpError(409, 'Não foi possível transferir a moderação.');
+    roomsUpdated();
+    return result;
+  });
+  fastify.get<{ Querystring: { room?: string; round?: string } }>('/api/rounds/validate', async (req) => {
+    const input = roomQuery.extend({ round: z.string().max(180).optional() }).parse(req.query);
+    const engine = getEngine(input.room);
+    const result = engine.validateRoundToken(input.round);
+    if (input.round && !result.valid && !result.roundData) {
+      const summary = await database.getRoundSummary(engine.getState().roomCode, input.round, engine.getState().roomName);
+      if (summary) return { ...result, roundData: summary };
     }
-    if (!roomCode || !name) {
-      return reply.code(400).send({ ok: false, error: 'Código e nome da sala são obrigatórios.' });
-    }
-    const cleanCode = roomCode.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 12);
-    const outcome = await roomManager.createRoom({ roomCode: cleanCode, name, isOpen: true });
-    io.emit('rooms:updated', roomManager.listRooms());
-    return { ok: true, state: outcome.state };
+    return result;
   });
-
-  fastify.get<{
-    Querystring: { room?: string; round?: string };
-  }>('/api/rounds/validate', async (req) => {
-    const engine = getEngine(req.query?.room);
-    return engine.validateRoundToken(req.query?.round);
-  });
-
-  fastify.post<{ Body: { nickname?: string } }>('/api/validate-nickname', async (req) => {
-    const raw = req.body?.nickname ?? '';
-    return validateNickname(raw);
-  });
-
-  // ============================================================================
-  // Socket.io Realtime Events
-  // ============================================================================
+  fastify.post('/api/validate-nickname', async (req) => validateNickname(z.object({ nickname: z.string().max(200) }).parse(req.body).nickname));
 
   io.on('connection', (socket) => {
-    let currentSocketRoomCode = 'MDX26';
-    socket.join(currentSocketRoomCode);
-
-    // Envia estado imediato ao conectar
-    socket.emit('room:state', getEngine(currentSocketRoomCode).getState());
-
-    // Associar socket a uma sala específica
-    socket.on(
-      'room:join-session',
-      (payload: { roomCode?: string }, cb?: (state: unknown) => void) => {
-        const targetCode = (payload?.roomCode || 'MDX26').toUpperCase().trim();
-        socket.leave(currentSocketRoomCode);
-        currentSocketRoomCode = targetCode;
-        socket.join(targetCode);
-        const engine = getEngine(targetCode);
-        const state = engine.getState();
-        socket.emit('room:state', state);
-        if (typeof cb === 'function') cb(state);
-      }
-    );
-
-    socket.on('room:request-state', (payload?: { roomCode?: string } | ((state: unknown) => void), cb?: (state: unknown) => void) => {
-      const callback = typeof payload === 'function' ? payload : cb;
-      const targetRoom = typeof payload === 'object' && payload?.roomCode ? payload.roomCode : currentSocketRoomCode;
-      const state = getEngine(targetRoom).getState();
-      socket.emit('room:state', state);
-      if (typeof callback === 'function') callback(state);
-    });
-
-    // 1. Identificar dispositivo (recuperar perfil salvo e High Score)
-    socket.on(
-      'player:identify',
-      async (
-        payload: { deviceId?: string; roomCode?: string },
-        cb?: (res: { ok: boolean; profile: unknown; state: unknown }) => void
-      ) => {
+    let currentRoom = 'MDX26';
+    socket.join(currentRoom);
+    socket.emit('room:state', getEngine(currentRoom).getState());
+    let windowAt = Date.now();
+    let eventCount = 0;
+    const on = <T extends z.ZodTypeAny>(event: string, schema: T, handler: (input: z.infer<T>) => unknown | Promise<unknown>) => {
+      socket.on(event, async (payload: unknown, callback?: (result: any) => void) => {
         try {
-          const deviceId = (payload?.deviceId || '').trim();
-          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-          currentSocketRoomCode = targetRoom;
-          socket.join(targetRoom);
-          const engine = getEngine(targetRoom);
-
-          if (!deviceId) {
-            const resp = { ok: false, profile: null, state: engine.getState() };
-            if (typeof cb === 'function') cb(resp);
-            return;
-          }
-
-          const profile = await database.findPlayerByDeviceId(deviceId);
-          if (profile) {
-            const currentRoomPlayer = engine
-              .getState()
-              .players.find((p) => p.deviceId === deviceId);
-            if (currentRoomPlayer) {
-              engine.joinRoom(profile, socket.id);
-            }
-          }
-
-          const resp = { ok: true, profile, state: engine.getState() };
-          socket.emit('player:identified', resp);
-          if (typeof cb === 'function') cb(resp);
-        } catch (err) {
-          console.error('❌ [Socket] Erro em player:identify:', err);
-          if (typeof cb === 'function') {
-            cb({ ok: false, profile: null, state: getEngine(currentSocketRoomCode).getState() });
-          }
+          if (Date.now() - windowAt > 1000) { windowAt = Date.now(); eventCount = 0; }
+          if (++eventCount > 40) throw new HttpError(429, 'Muitas ações em sequência. Aguarde um instante.');
+          const input = schema.parse(payload ?? {});
+          const result = await handler(input);
+          if (typeof callback === 'function') callback(result);
+        } catch (error) {
+          const result = requestError(error);
+          if (result.statusCode === 500) console.error(`[Socket] ${event}:`, error);
+          if (typeof callback === 'function') callback({ ok: false, error: result.error, code: result.code });
+          else socket.emit('operation:error', { ok: false, error: result.error });
         }
-      }
-    );
-
-    // 2. Registrar / atualizar apelido e avatar
-    socket.on(
-      'player:register',
-      async (
-        payload: { deviceId?: string; nickname?: string; avatar?: AvatarId; roomCode?: string },
-        cb?: (res: {
-          ok: boolean;
-          profile?: unknown;
-          error?: string;
-          suggestions?: string[];
-        }) => void
-      ) => {
-        try {
-          const deviceId = (payload?.deviceId || '').trim();
-          const rawNickname = payload?.nickname || '';
-          const avatar: AvatarId = payload?.avatar || 'menina-mdx';
-          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-          const engine = getEngine(targetRoom);
-
-          if (!deviceId) {
-            const res = { ok: false, error: 'Dispositivo não identificado.' };
-            socket.emit('player:register-result', res);
-            if (typeof cb === 'function') cb(res);
-            return;
-          }
-
-          const validation = validateNickname(rawNickname);
-          if (!validation.valid) {
-            const res = {
-              ok: false,
-              error: validation.reason || 'Apelido inválido.',
-              suggestions: validation.suggestions,
-            };
-            socket.emit('player:register-result', res);
-            if (typeof cb === 'function') cb(res);
-            return;
-          }
-
-          const profile = await database.upsertPlayer({
-            deviceId,
-            nickname: validation.sanitized,
-            avatar,
-            isBot: false,
-            roomCode: targetRoom,
-          });
-
-          await engine.refreshLeaderboards();
-
-          const res = { ok: true, profile };
-          socket.emit('player:register-result', res);
-          if (typeof cb === 'function') cb(res);
-        } catch (err) {
-          console.error('❌ [Socket] Erro em player:register:', err);
-          const res = { ok: false, error: 'Erro interno ao registrar jogadora.' };
-          if (typeof cb === 'function') cb(res);
-        }
-      }
-    );
-
-    // 3. Entrar na sala (com validação de sala aberta e roundToken da rodada!)
-    socket.on(
-      'player:join-room',
-      async (
-        payload: {
-          deviceId?: string;
-          nickname?: string;
-          avatar?: AvatarId;
-          roomCode?: string;
-          roundToken?: string;
-        },
-        cb?: (res: {
-          ok: boolean;
-          slot?: PlayerSlot;
-          profile?: unknown;
-          error?: string;
-          expired?: boolean;
-          roundData?: unknown;
-          suggestions?: string[];
-          state: unknown;
-        }) => void
-      ) => {
-        try {
-          const deviceId = (payload?.deviceId || '').trim();
-          const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-          currentSocketRoomCode = targetRoom;
-          socket.join(targetRoom);
-          const engine = getEngine(targetRoom);
-
-          if (!deviceId) {
-            const res = {
-              ok: false,
-              error: 'DeviceId obrigatório.',
-              state: engine.getState(),
-            };
-            if (typeof cb === 'function') cb(res);
-            return;
-          }
-
-          let profile = await database.findPlayerByDeviceId(deviceId);
-
-          if (payload?.nickname) {
-            const validation = validateNickname(payload.nickname);
-            if (!validation.valid) {
-              const res = {
-                ok: false,
-                error: validation.reason,
-                suggestions: validation.suggestions,
-                state: engine.getState(),
-              };
-              socket.emit('player:join-result', res);
-              if (typeof cb === 'function') cb(res);
-              return;
-            }
-            profile = await database.upsertPlayer({
-              deviceId,
-              nickname: validation.sanitized,
-              avatar: payload.avatar || profile?.avatar || 'menina-mdx',
-              isBot: false,
-              roomCode: targetRoom,
-            });
-          }
-
-          if (!profile) {
-            const res = {
-              ok: false,
-              error: 'Registre seu apelido antes de entrar na partida!',
-              state: engine.getState(),
-            };
-            socket.emit('player:join-result', res);
-            if (typeof cb === 'function') cb(res);
-            return;
-          }
-
-          const joinOutcome = engine.joinRoom(profile, socket.id, payload?.roundToken);
-          const res = {
-            ok: joinOutcome.joined,
-            slot: joinOutcome.slot,
-            profile,
-            error: joinOutcome.reason,
-            expired: joinOutcome.expired,
-            roundData: joinOutcome.roundData,
-            state: joinOutcome.state,
-          };
-
-          socket.emit('player:join-result', res);
-          if (typeof cb === 'function') cb(res);
-        } catch (err) {
-          console.error('❌ [Socket] Erro em player:join-room:', err);
-          if (typeof cb === 'function') {
-            cb({
-              ok: false,
-              error: 'Erro ao entrar na sala.',
-              state: getEngine(currentSocketRoomCode).getState(),
-            });
-          }
-        }
-      }
-    );
-
-    // 4. Sair da sala
-    const handleLeaveRoom = (payload: { deviceId?: string; roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
-      const deviceId = (payload?.deviceId || '').trim();
-      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-      if (deviceId) {
-        getEngine(targetRoom).leaveRoom(deviceId);
-      }
-      if (typeof cb === 'function') cb({ ok: true });
+      });
     };
-
-    socket.on('player:leave-room', handleLeaveRoom);
-    socket.on('player:Leave-room', handleLeaveRoom);
-
-    // 5. Indicador de digitação ao vivo
-    socket.on('player:typing', (payload: { deviceId?: string; draftPrompt?: string; roomCode?: string }) => {
-      const deviceId = (payload?.deviceId || '').trim();
-      if (!deviceId) return;
-      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-      getEngine(targetRoom).setPlayerTyping(deviceId, payload?.draftPrompt || '');
-    });
-
-    // 6. Enviar e travar palpite de prompt
-    socket.on(
-      'player:submit-prompt',
-      (
-        payload: { deviceId?: string; prompt?: string; roomCode?: string; roundToken?: string },
-        cb?: (res: { ok: boolean; state: unknown; error?: string }) => void
-      ) => {
-        const deviceId = (payload?.deviceId || '').trim();
-        const prompt = payload?.prompt || '';
-        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-        const engine = getEngine(targetRoom);
-
-        // Se enviou roundToken e está expirado:
-        if (payload?.roundToken && payload.roundToken !== engine.getState().roundToken) {
-          const res = {
-            ok: false,
-            error: 'Esta rodada já foi finalizada! O QR Code expirou.',
-            state: engine.getState(),
-          };
-          socket.emit('player:prompt-locked', res);
-          if (typeof cb === 'function') cb(res);
-          return;
-        }
-
-        const outcome = engine.submitPlayerPrompt(deviceId, prompt);
-        const res = { ok: outcome.accepted, state: outcome.state };
-        socket.emit('player:prompt-locked', res);
-        if (typeof cb === 'function') cb(res);
+    const targetInput = z.object({ roomCode: roomCodeSchema.optional() });
+    const targetCode = (code?: string) => roomCodeSchema.parse(code || currentRoom);
+    const switchRoom = (code: string) => {
+      const engine = getEngine(code);
+      if (currentRoom !== code) {
+        getEngine(currentRoom).handleDisconnect(socket.id);
+        socket.leave(currentRoom);
+        currentRoom = code;
+        socket.join(code);
       }
-    );
-
-    // 7. Atalho para bots
-    const handleStartWithBots = (payload?: { roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
-      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-      getEngine(targetRoom).fillBotsAndStartNow();
-      if (typeof cb === 'function') cb({ ok: true });
+      return engine;
     };
-
-    socket.on('room:start-with-bots', handleStartWithBots);
-    socket.on('room:fill-bots-now', handleStartWithBots);
-
-    // 8. Resetar sala
-    socket.on('room:reset', (payload?: { roomCode?: string }, cb?: (res: { ok: boolean }) => void) => {
-      const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-      getEngine(targetRoom).resetToIdle();
-      if (typeof cb === 'function') cb({ ok: true });
+    on('room:join-session', targetInput, (input) => switchRoom(targetCode(input.roomCode)).getState());
+    on('room:request-state', targetInput, (input) => getEngine(targetCode(input.roomCode)).getState());
+    on('player:identify', targetInput, async (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      const code = targetCode(input.roomCode);
+      const engine = switchRoom(code);
+      const profile = await database.findPlayerByDeviceId(deviceId, code);
+      if (profile && engine.getState().players.some((p) => p.id === profile.id)) engine.joinRoom(profile, socket.id);
+      return { ok: true, profile, state: engine.getState() };
     });
-
-    // 9. Moderação: Abrir sala na TV com senha
-    socket.on(
-      'moderator:open-room',
-      async (
-        payload: { roomCode: string; name: string; password?: string },
-        cb?: (res: { ok: boolean; error?: string; state?: unknown }) => void
-      ) => {
-        if (!verifyAdminPassword(payload?.password)) {
-          const res = { ok: false, error: 'Senha de moderador incorreta.' };
-          if (typeof cb === 'function') cb(res);
-          return;
-        }
-        const outcome = await roomManager.openRoom({
-          roomCode: payload.roomCode,
-          name: payload.name,
-          password: payload.password,
-        });
-        currentSocketRoomCode = payload.roomCode.toUpperCase().trim();
-        socket.join(currentSocketRoomCode);
-        io.emit('rooms:updated', roomManager.listRooms());
-        if (typeof cb === 'function') cb({ ok: true, state: outcome.state });
-      }
-    );
-
-    // 9.1 Moderação: Fechar sala na TV com senha
-    socket.on(
-      'moderator:close-room',
-      async (
-        payload: { roomCode: string; password?: string },
-        cb?: (res: { ok: boolean; error?: string; state?: unknown }) => void
-      ) => {
-        if (!verifyAdminPassword(payload?.password)) {
-          const res = { ok: false, error: 'Senha de moderador incorreta.' };
-          if (typeof cb === 'function') cb(res);
-          return;
-        }
-        const target = (payload.roomCode || currentSocketRoomCode).toUpperCase().trim();
-        await roomManager.closeRoom(target);
-        const engine = getEngine(target);
-        io.emit('rooms:updated', roomManager.listRooms());
-        if (typeof cb === 'function') cb({ ok: true, state: engine.getState() });
-      }
-    );
-
-    // 10. Moderação: Expulsar jogador da rodada (Kick Player)
-    socket.on(
-      'moderator:kick-player',
-      (
-        payload: {
-          roomCode?: string;
-          playerId: string;
-          slot?: PlayerSlot;
-          reason?: string;
-          password?: string;
-        },
-        cb?: (res: { ok: boolean; error?: string }) => void
-      ) => {
-        if (!verifyAdminPassword(payload?.password)) {
-          const res = { ok: false, error: 'Não autorizado. Senha de moderador inválida.' };
-          if (typeof cb === 'function') cb(res);
-          return;
-        }
-
-        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-        const engine = getEngine(targetRoom);
-        const outcome = engine.kickPlayer(payload.playerId || payload.slot || '', payload?.reason);
-        const res = { ok: outcome.kicked };
-        if (typeof cb === 'function') cb(res);
-      }
-    );
-
-    // 11. Limpar Ranking Geral
-    socket.on(
-      'room:clear-ranking',
-      async (
-        payload?: { password?: string; roomCode?: string },
-        cb?: (res: { ok: boolean; error?: string }) => void
-      ) => {
-        if (!verifyAdminPassword(payload?.password)) {
-          if (typeof cb === 'function') {
-            cb({ ok: false, error: 'Apenas administradores podem limpar o ranking (/admin).' });
-          }
-          return;
-        }
-        const targetRoom = (payload?.roomCode || currentSocketRoomCode).toUpperCase().trim();
-        await database.clearAllRankings(targetRoom);
-        await getEngine(targetRoom).refreshLeaderboards();
-        if (typeof cb === 'function') cb({ ok: true });
-      }
-    );
-
-    socket.on('disconnect', () => {
-      getEngine(currentSocketRoomCode).handleDisconnect(socket.id);
+    on('player:register', targetInput.extend({ nickname: z.string().max(200), avatar: avatarSchema.optional() }), async (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      const code = targetCode(input.roomCode);
+      const engine = getEngine(code);
+      const validation = validateNickname(input.nickname);
+      if (!validation.valid) return { ok: false, error: validation.reason, suggestions: validation.suggestions };
+      const profile = await database.upsertPlayer({ deviceId, nickname: validation.sanitized, avatar: input.avatar || 'menina-mdx', roomCode: code, isBot: false });
+      await engine.refreshLeaderboards();
+      return { ok: true, profile };
     });
+    on('player:join-room', targetInput.extend({ nickname: z.string().max(200).optional(), avatar: avatarSchema.optional(), roundToken: z.string().max(180).optional() }), async (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      const code = targetCode(input.roomCode);
+      const engine = switchRoom(code);
+      let profile = await database.findPlayerByDeviceId(deviceId, code);
+      const existing = profile && engine.getState().players.some((p) => p.id === profile!.id);
+      if (!existing) {
+        const validation = engine.validateRoundToken(input.roundToken);
+        if (!validation.valid) return { ok: false, error: validation.status === 'ROOM_CLOSED' ? 'As entradas desta sala estão fechadas.' : 'Escaneie o QR Code atual do telão.', expired: validation.status === 'EXPIRED', roundData: validation.roundData, state: engine.getState() };
+      }
+      if (!profile && input.nickname) {
+        const validation = validateNickname(input.nickname);
+        if (!validation.valid) return { ok: false, error: validation.reason, suggestions: validation.suggestions, state: engine.getState() };
+        profile = await database.upsertPlayer({ deviceId, nickname: validation.sanitized, avatar: input.avatar || 'menina-mdx', roomCode: code, isBot: false });
+      }
+      if (!profile) return { ok: false, error: 'Cadastre seu apelido nesta sala antes de jogar.', state: engine.getState() };
+      const outcome = engine.joinRoom(profile, socket.id, input.roundToken);
+      return { ok: outcome.joined, profile, slot: outcome.slot, error: outcome.reason, expired: outcome.expired, roundData: outcome.roundData, state: outcome.state };
+    });
+    for (const event of ['player:leave-room', 'player:Leave-room']) on(event, targetInput, (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      const engine = getEngine(targetCode(input.roomCode));
+      engine.leaveRoom(deviceId);
+      return { ok: true, state: engine.getState() };
+    });
+    on('player:typing', targetInput.extend({ draftPrompt: z.string().max(320) }), (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      getEngine(targetCode(input.roomCode)).setPlayerTyping(deviceId, input.draftPrompt);
+      return { ok: true };
+    });
+    on('player:submit-prompt', targetInput.extend({ prompt: z.string().trim().min(1).max(320), roundToken: z.string().min(1).max(180) }), (input) => {
+      const deviceId = auth.requireDevice(socket.request.headers);
+      const engine = getEngine(targetCode(input.roomCode));
+      if (input.roundToken !== engine.getState().roundToken) throw new HttpError(409, 'Esta rodada já terminou. Escaneie o QR Code atual.');
+      const outcome = engine.submitPlayerPrompt(deviceId, input.prompt);
+      return { ok: outcome.accepted, state: outcome.state, ...(!outcome.accepted ? { error: 'Não foi possível enviar o palpite nesta rodada.' } : {}) };
+    });
+    for (const event of ['room:start-with-bots', 'room:fill-bots-now']) on(event, targetInput, async (input) => {
+      const code = targetCode(input.roomCode);
+      await authorizeRoom(socket.request.headers, code);
+      const engine = getEngine(code);
+      if (!engine.getState().isOpen) throw new HttpError(409, 'Reabra as entradas antes de iniciar uma nova rodada.');
+      engine.fillBotsAndStartNow();
+      return { ok: true, state: engine.getState() };
+    });
+    on('room:reset', targetInput, async (input) => {
+      const code = targetCode(input.roomCode);
+      await authorizeRoom(socket.request.headers, code);
+      cancelRooms(code);
+      roomsUpdated();
+      return { ok: true, state: getEngine(code).getState() };
+    });
+    on('moderator:open-room', roomInput.extend({ name: z.string().trim().min(2).max(120).optional() }), async (input) => {
+      await authorizeRoom(socket.request.headers, input.roomCode);
+      const result = await roomManager.openRoom({ roomCode: input.roomCode, name: input.name || getEngine(input.roomCode).getState().roomName });
+      roomsUpdated();
+      return result;
+    });
+    on('moderator:close-room', roomInput, async (input) => {
+      await authorizeRoom(socket.request.headers, input.roomCode);
+      await roomManager.closeRoom(input.roomCode);
+      roomsUpdated();
+      return { ok: true, state: getEngine(input.roomCode).getState() };
+    });
+    on('moderator:kick-player', targetInput.extend({ playerId: z.string().min(1).max(100), reason: z.string().max(200).optional() }), async (input) => {
+      const code = targetCode(input.roomCode);
+      await authorizeRoom(socket.request.headers, code);
+      if (roomManager.isCommittingRound(code)) throw new HttpError(409, 'Aguarde a gravação do resultado para remover participantes.');
+      return { ok: getEngine(code).kickPlayer(input.playerId, input.reason).kicked };
+    });
+    on('room:clear-ranking', targetInput.extend({ confirm: z.literal(true) }), async (input) => {
+      const code = targetCode(input.roomCode);
+      await authorizeRoom(socket.request.headers, code);
+      cancelRooms(code);
+      await database.clearAllRankings(code);
+      await refreshRooms();
+      return { ok: true };
+    });
+    socket.on('disconnect', () => roomManager.getRoom(currentRoom)?.handleDisconnect(socket.id));
   });
 
-  // ============================================================================
-  // Produção: Servir arquivos estáticos do Vite SPA (dist/public)
-  // ============================================================================
-
-  const publicDistPath = path.resolve(process.cwd(), 'dist', 'public');
-  if (fs.existsSync(publicDistPath)) {
-    await fastify.register(fastifyStatic, {
-      root: publicDistPath,
-      prefix: '/',
-      wildcard: false,
-    });
-
+  const publicPath = path.resolve('dist', 'public');
+  if (fs.existsSync(publicPath)) {
+    await fastify.register(fastifyStatic, { root: publicPath, prefix: '/', wildcard: false });
     fastify.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/') || req.url.startsWith('/socket.io/')) {
-        reply.code(404).send({ error: 'Endpoint não encontrado' });
-        return;
-      }
-      reply.sendFile('index.html');
+      if (req.url.startsWith('/api/') || req.url.startsWith('/socket.io/')) return reply.code(404).send({ ok: false, error: 'Endpoint não encontrado.' });
+      return reply.sendFile('index.html');
     });
   }
-
-  await fastify.listen({ port: PORT, host: HOST });
-  console.log(`🚀 [MDX STEAM 2026] Servidor Desafio de Prompt rodando em http://${HOST}:${PORT}`);
+  return { fastify, io, roomManager, auth, close: async () => { roomManager.dispose(); await new Promise<void>((resolve) => io.close(() => resolve())); await fastify.close(); } };
 }
 
-bootstrap().catch((err) => {
-  console.error('❌ Falha crítica ao iniciar o servidor:', err);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  createApplication().then(async ({ fastify }) => {
+    const host = process.env.HOST || '0.0.0.0';
+    const port = Number(process.env.PORT || 3001);
+    await fastify.listen({ host, port });
+    console.log(`🚀 [MDX STEAM 2026] Servidor Desafio de Prompt rodando em http://${host}:${port}`);
+  }).catch((error) => { console.error('❌ Falha crítica ao iniciar o servidor:', error); process.exitCode = 1; });
+}

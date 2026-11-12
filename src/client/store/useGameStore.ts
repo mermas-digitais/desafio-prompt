@@ -1,397 +1,153 @@
 import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
-import type {
-  AvatarId,
-  ExpiredRoundSummary,
-  GameRoomState,
-  PlayerProfile,
-  PlayerSlot,
-} from '../../shared/types';
+import type { AvatarId, ExpiredRoundSummary, GameRoomState, PlayerProfile, PlayerSlot } from '../../shared/types';
+import { api } from '../lib/api';
+import { isRequestedRoom } from '../lib/sessionHelpers';
 
 export const DEFAULT_ROOM_STATE: GameRoomState = {
-  roomCode: 'MDX26',
-  roomName: 'Arena MDX Principal',
-  isOpen: true,
-  roundId: 'init-round',
-  roundToken: 'rt-init',
-  phase: 'IDLE',
-  lobbyTimeLeft: 90,
-  roundTimeLeft: 90,
-  countdownLeft: 3,
-  blurPx: 16,
-  players: [],
-  challenge: null,
-  evaluations: [],
-  currentRevealIndex: 0,
-  revealStepTimer: 8,
-  leaderboards: {
-    general: [],
-    points: [],
-    wins: [],
-    stats: {
-      totalPlayers: 0,
-      totalMatches: 0,
-      highestScoreEver: 0,
-    },
-  },
+  roomCode: 'MDX26', roomName: 'Arena MDX Principal', isOpen: false,
+  roundId: '', roundToken: '', phase: 'IDLE', lobbyTimeLeft: 90, roundTimeLeft: 90,
+  countdownLeft: 3, blurPx: 16, players: [], challenge: null, evaluations: [],
+  currentRevealIndex: 0, revealStepTimer: 8,
+  leaderboards: { general: [], points: [], wins: [], stats: { totalPlayers: 0, totalMatches: 0, highestScoreEver: 0 } },
 };
 
-export interface IdentifyResponse {
-  ok: boolean;
-  profile: PlayerProfile | null;
-  state: GameRoomState;
-}
-
-export interface RegisterResponse {
-  ok: boolean;
-  profile?: PlayerProfile;
-  error?: string;
-  suggestions?: string[];
-}
-
-export interface JoinRoomResponse {
-  ok: boolean;
-  slot?: PlayerSlot;
-  profile?: PlayerProfile;
-  error?: string;
-  expired?: boolean;
-  roundData?: ExpiredRoundSummary;
-  suggestions?: string[];
-  state: GameRoomState;
-}
-
-export function getOrCreateDeviceId(): string {
-  if (typeof window === 'undefined') return 'mdx26-ssr-device';
-  const STORAGE_KEY = 'mdx26_device_id';
-  let id = window.localStorage.getItem(STORAGE_KEY);
-  if (!id) {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      id = `mdx26-${crypto.randomUUID()}`;
-    } else {
-      id = `mdx26-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    }
-    window.localStorage.setItem(STORAGE_KEY, id);
-  }
-  return id;
-}
+interface CommandResponse { ok: boolean; error?: string; state?: GameRoomState }
+export interface IdentifyResponse extends CommandResponse { profile: PlayerProfile | null }
+export interface RegisterResponse extends CommandResponse { profile?: PlayerProfile; suggestions?: string[] }
+export interface JoinRoomResponse extends RegisterResponse { slot?: PlayerSlot; expired?: boolean; roundData?: ExpiredRoundSummary }
 
 let socketSingleton: Socket | null = null;
 let socketBoundToStore = false;
+let privateDeviceId = '';
+let sessionRequest: Promise<string> | null = null;
 
 export function getSocket(): Socket {
-  if (!socketSingleton) {
-    const url = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
-    socketSingleton = io(url, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 600,
-    });
-  }
+  if (!socketSingleton) socketSingleton = io(typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001', {
+    autoConnect: false, withCredentials: true, transports: ['websocket', 'polling'],
+    reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 600,
+  });
   return socketSingleton;
+}
+
+// Legacy local IDs are deliberately not read: public IDs cannot prove ownership.
+export function getOrCreateDeviceId(): string { return privateDeviceId; }
+
+export function ensurePlayerSession(): Promise<string> {
+  if (privateDeviceId) return Promise.resolve(privateDeviceId);
+  if (!sessionRequest) sessionRequest = api<{ deviceId: string }>('/api/player/session', {}).then(({ deviceId }) => {
+    if (!deviceId) throw new Error('Sessão privada indisponível. Recarregue a página.');
+    privateDeviceId = deviceId;
+    const socket = getSocket();
+    if (socket.connected) socket.disconnect().connect();
+    return deviceId;
+  }).finally(() => { sessionRequest = null; });
+  return sessionRequest;
 }
 
 interface GameStoreState {
   roomState: GameRoomState;
+  requestedRoomCode: string;
   isConnected: boolean;
   isSyncing: boolean;
   kickedReason: string | null;
-  setRoomState: (nextState: GameRoomState) => void;
-  setIsConnected: (connected: boolean) => void;
-  setIsSyncing: (syncing: boolean) => void;
-  setKickedReason: (reason: string | null) => void;
+  connectionError: string | null;
+  setRoomState: (state: GameRoomState) => void;
+  setIsConnected: (value: boolean) => void;
+  setIsSyncing: (value: boolean) => void;
+  setKickedReason: (value: string | null) => void;
   initSocketConnection: () => void;
   joinSessionRoom: (roomCode: string) => void;
-  openRoom: (params: {
-    roomCode: string;
-    name: string;
-    password?: string;
-  }) => Promise<{ ok: boolean; error?: string; state?: GameRoomState }>;
-  closeRoom: (params: {
-    roomCode?: string;
-    password?: string;
-  }) => Promise<{ ok: boolean; error?: string; state?: GameRoomState }>;
-  kickPlayer: (params: {
-    roomCode?: string;
-    playerId: string;
-    slot?: PlayerSlot;
-    reason?: string;
-    password?: string;
-  }) => Promise<{ ok: boolean; error?: string }>;
+  openRoom: (params: { roomCode: string; name: string }) => Promise<CommandResponse>;
+  closeRoom: (params: { roomCode: string }) => Promise<CommandResponse>;
+  kickPlayer: (params: { roomCode?: string; playerId: string; slot?: PlayerSlot; reason?: string }) => Promise<CommandResponse>;
   identifyDevice: (deviceId: string, roomCode?: string) => Promise<IdentifyResponse>;
-  registerPlayer: (params: {
-    deviceId: string;
-    nickname: string;
-    avatar: AvatarId;
-    roomCode?: string;
-  }) => Promise<RegisterResponse>;
-  joinRoom: (params: {
-    deviceId: string;
-    nickname?: string;
-    avatar?: AvatarId;
-    roomCode?: string;
-    roundToken?: string;
-  }) => Promise<JoinRoomResponse>;
-  leaveRoom: (deviceId: string, roomCode?: string) => Promise<{ ok: boolean }>;
+  registerPlayer: (params: { deviceId: string; nickname: string; avatar: AvatarId; roomCode?: string; roundToken?: string }) => Promise<RegisterResponse>;
+  joinRoom: (params: { deviceId: string; nickname?: string; avatar?: AvatarId; roomCode?: string; roundToken?: string }) => Promise<JoinRoomResponse>;
+  leaveRoom: (deviceId: string, roomCode?: string) => Promise<CommandResponse>;
   sendTypingDraft: (deviceId: string, draftPrompt: string, roomCode?: string) => void;
-  submitPrompt: (
-    deviceId: string,
-    prompt: string,
-    roomCode?: string,
-    roundToken?: string
-  ) => Promise<{ ok: boolean; state: GameRoomState; error?: string }>;
-  startWithBotsNow: (roomCode?: string) => Promise<{ ok: boolean }>;
-  resetRoom: (roomCode?: string) => Promise<{ ok: boolean }>;
-  clearRanking: (password?: string, roomCode?: string) => Promise<{ ok: boolean; error?: string }>;
+  submitPrompt: (deviceId: string, prompt: string, roomCode?: string, roundToken?: string) => Promise<CommandResponse>;
+  startWithBotsNow: (roomCode?: string) => Promise<CommandResponse>;
+  resetRoom: (roomCode?: string) => Promise<CommandResponse>;
+  clearRanking: (roomCode?: string) => Promise<CommandResponse>;
+}
+
+async function command<T extends CommandResponse>(event: string, payload: object): Promise<T> {
+  const store = useGameStore.getState();
+  store.initSocketConnection();
+  store.setIsSyncing(true);
+  return new Promise((resolve) => {
+    getSocket().timeout(10000).emit(event, payload, (error: Error | null, response?: T) => {
+      store.setIsSyncing(false);
+      const result = error || !response ? { ok: false, error: 'Servidor não respondeu. Confira a conexão e atualize antes de repetir a ação.' } as T : response;
+      if (result.state) useGameStore.getState().setRoomState(result.state);
+      resolve(result);
+    });
+  });
 }
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
-  roomState: DEFAULT_ROOM_STATE,
-  isConnected: false,
-  isSyncing: false,
-  kickedReason: null,
-
-  setRoomState: (nextState) => {
-    if (nextState && nextState.phase) {
-      set({ roomState: nextState });
-    }
-  },
-
-  setIsConnected: (connected) => set({ isConnected: connected }),
-
-  setIsSyncing: (syncing) => set({ isSyncing: syncing }),
-
-  setKickedReason: (reason) => set({ kickedReason: reason }),
-
+  roomState: DEFAULT_ROOM_STATE, requestedRoomCode: 'MDX26', isConnected: false,
+  isSyncing: false, kickedReason: null, connectionError: null,
+  setRoomState: (state) => { if (isRequestedRoom(state, get().requestedRoomCode)) set({ roomState: state }); },
+  setIsConnected: (isConnected) => set({ isConnected }),
+  setIsSyncing: (isSyncing) => set({ isSyncing }),
+  setKickedReason: (kickedReason) => set({ kickedReason }),
   initSocketConnection: () => {
-    if (typeof window === 'undefined' || socketBoundToStore) return;
-    socketBoundToStore = true;
-
+    if (typeof window === 'undefined') return;
     const socket = getSocket();
-
-    socket.on('connect', () => {
-      set({ isConnected: true });
-      const currentCode = get().roomState.roomCode || 'MDX26';
-      socket.emit('room:join-session', { roomCode: currentCode }, (st: GameRoomState) => {
-        if (st && st.phase) {
-          set({ roomState: st });
-        }
+    if (!socketBoundToStore) {
+      socketBoundToStore = true;
+      socket.on('connect', () => {
+        set({ isConnected: true, connectionError: null });
+        get().joinSessionRoom(get().requestedRoomCode);
       });
-    });
-
-    socket.on('disconnect', () => {
-      set({ isConnected: false });
-    });
-
-    socket.on('room:state', (nextState: GameRoomState) => {
-      if (nextState && nextState.phase) {
-        set({ roomState: nextState });
-      }
-    });
-
-    socket.on('player:kicked', (payload: { reason?: string }) => {
-      set({
-        kickedReason: payload?.reason || 'Você foi removida da rodada pelo moderador da sala.',
+      socket.on('disconnect', () => set({ isConnected: false }));
+      socket.on('connect_error', () => set({ connectionError: 'Sem conexão com a sala. Tentando reconectar…' }));
+      socket.on('operation:error', (response: { error?: string }) => set({ connectionError: response.error || 'Ação recusada. Atualize a sala.' }));
+      socket.on('room:state', (state: GameRoomState) => get().setRoomState(state));
+      socket.on('player:kicked', (payload: { reason?: string; roomCode?: string }) => {
+        if (!payload.roomCode || payload.roomCode === get().requestedRoomCode) set({ kickedReason: payload.reason || 'Você foi removida desta rodada.' });
       });
-    });
-
-    if (socket.connected) {
-      set({ isConnected: true });
-      const currentCode = get().roomState.roomCode || 'MDX26';
-      socket.emit('room:request-state', { roomCode: currentCode }, (st: GameRoomState) => {
-        if (st && st.phase) {
-          set({ roomState: st });
-        }
-      });
-    } else {
-      fetch('/api/state')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data: GameRoomState | null) => {
-          if (data && data.phase) {
-            set({ roomState: data });
-          }
-        })
-        .catch(() => {});
     }
+    if (!socket.connected) socket.connect();
   },
-
-  joinSessionRoom: (roomCode: string) => {
-    const socket = getSocket();
-    const clean = (roomCode || 'MDX26').toUpperCase().trim();
-    socket.emit('room:join-session', { roomCode: clean }, (st: GameRoomState) => {
-      if (st && st.phase) {
-        set({ roomState: st });
-      }
-    });
-  },
-
-  openRoom: (params) => {
+  joinSessionRoom: (roomCode) => {
+    const clean = roomCode.toUpperCase().trim();
+    if (clean !== get().requestedRoomCode) set({ requestedRoomCode: clean, roomState: { ...DEFAULT_ROOM_STATE, roomCode: clean, roomName: clean }, kickedReason: null });
     get().initSocketConnection();
-    const socket = getSocket();
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('moderator:open-room', params, (res: { ok: boolean; error?: string; state?: GameRoomState }) => {
-        if (res?.state && res.state.phase) {
-          set({ roomState: res.state, isSyncing: false });
-        } else {
-          set({ isSyncing: false });
-        }
-        resolve(res);
-      });
+    getSocket().timeout(10000).emit('room:join-session', { roomCode: clean }, (error: Error | null, state?: GameRoomState & { error?: string }) => {
+      if (get().requestedRoomCode !== clean) return;
+      if (error) set({ connectionError: 'Sala não respondeu. Confira o código e tente recarregar.' });
+      else if (state?.error) set({ connectionError: state.error });
+      else if (state) { get().setRoomState(state); set({ connectionError: null }); }
     });
   },
-
-  closeRoom: (params) => {
-    get().initSocketConnection();
+  openRoom: (params) => command('moderator:open-room', params),
+  closeRoom: (params) => command('moderator:close-room', params),
+  kickPlayer: (params) => command('moderator:kick-player', { ...params, roomCode: params.roomCode || get().requestedRoomCode }),
+  identifyDevice: async (_deviceId, roomCode) => {
+    await ensurePlayerSession();
+    return command<IdentifyResponse>('player:identify', { roomCode: roomCode || get().requestedRoomCode });
+  },
+  registerPlayer: async ({ deviceId: _deviceId, ...params }) => {
+    await ensurePlayerSession();
+    return command('player:register', { ...params, roomCode: params.roomCode || get().requestedRoomCode });
+  },
+  joinRoom: async ({ deviceId: _deviceId, ...params }) => {
+    await ensurePlayerSession();
+    return command('player:join-room', { ...params, roomCode: params.roomCode || get().requestedRoomCode });
+  },
+  leaveRoom: (_deviceId, roomCode) => command('player:leave-room', { roomCode: roomCode || get().requestedRoomCode }),
+  sendTypingDraft: (_deviceId, draftPrompt, roomCode) => {
     const socket = getSocket();
-    const targetRoom = params.roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit(
-        'moderator:close-room',
-        { ...params, roomCode: targetRoom },
-        (res: { ok: boolean; error?: string; state?: GameRoomState }) => {
-          if (res?.state && res.state.phase) {
-            set({ roomState: res.state, isSyncing: false });
-          } else {
-            set({ isSyncing: false });
-          }
-          resolve(res);
-        }
-      );
+    if (!socket.connected) return;
+    socket.timeout(10000).volatile.emit('player:typing', { draftPrompt, roomCode: roomCode || get().requestedRoomCode }, (error: Error | null, response?: CommandResponse) => {
+      if (error || response?.ok === false) set({ connectionError: response?.error || 'Não foi possível sincronizar o rascunho. Verifique a conexão.' });
     });
   },
-
-  kickPlayer: (params) => {
-    const socket = getSocket();
-    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
-    return new Promise((resolve) => {
-      socket.emit('moderator:kick-player', { ...params, roomCode }, (res: { ok: boolean; error?: string }) => {
-        resolve(res);
-      });
-    });
-  },
-
-  identifyDevice: (deviceId, roomCode) => {
-    get().initSocketConnection();
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('player:identify', { deviceId, roomCode: targetRoom }, (res: IdentifyResponse) => {
-        if (res?.state && res.state.phase) {
-          set({ roomState: res.state, isSyncing: false });
-        } else {
-          set({ isSyncing: false });
-        }
-        resolve(res);
-      });
-    });
-  },
-
-  registerPlayer: (params) => {
-    get().initSocketConnection();
-    const socket = getSocket();
-    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('player:register', { ...params, roomCode }, (res: RegisterResponse) => {
-        set({ isSyncing: false });
-        resolve(res);
-      });
-    });
-  },
-
-  joinRoom: (params) => {
-    get().initSocketConnection();
-    const socket = getSocket();
-    const roomCode = params.roomCode || get().roomState.roomCode || 'MDX26';
-    const roundToken = params.roundToken || get().roomState.roundToken;
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('player:join-room', { ...params, roomCode, roundToken }, (res: JoinRoomResponse) => {
-        if (res?.state && res.state.phase) {
-          set({ roomState: res.state, isSyncing: false });
-        } else {
-          set({ isSyncing: false });
-        }
-        resolve(res);
-      });
-    });
-  },
-
-  leaveRoom: (deviceId, roomCode) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('player:leave-room', { deviceId, roomCode: targetRoom }, (res: { ok: boolean }) => {
-        set({ isSyncing: false });
-        resolve(res || { ok: true });
-      });
-    });
-  },
-
-  sendTypingDraft: (deviceId, draftPrompt, roomCode) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    socket.emit('player:typing', { deviceId, draftPrompt, roomCode: targetRoom });
-  },
-
-  submitPrompt: (deviceId, prompt, roomCode, roundToken) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    const token = roundToken || get().roomState.roundToken;
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit(
-        'player:submit-prompt',
-        { deviceId, prompt, roomCode: targetRoom, roundToken: token },
-        (res: { ok: boolean; state: GameRoomState; error?: string }) => {
-          if (res?.state && res.state.phase) {
-            set({ roomState: res.state, isSyncing: false });
-          } else {
-            set({ isSyncing: false });
-          }
-          resolve(res);
-        }
-      );
-    });
-  },
-
-  startWithBotsNow: (roomCode) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('room:start-with-bots', { roomCode: targetRoom }, (res: { ok: boolean }) => {
-        set({ isSyncing: false });
-        resolve(res || { ok: true });
-      });
-    });
-  },
-
-  resetRoom: (roomCode) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('room:reset', { roomCode: targetRoom }, (res: { ok: boolean }) => {
-        set({ isSyncing: false });
-        resolve(res || { ok: true });
-      });
-    });
-  },
-
-  clearRanking: (password, roomCode) => {
-    const socket = getSocket();
-    const targetRoom = roomCode || get().roomState.roomCode || 'MDX26';
-    set({ isSyncing: true });
-    return new Promise((resolve) => {
-      socket.emit('room:clear-ranking', { password, roomCode: targetRoom }, (res: { ok: boolean; error?: string }) => {
-        set({ isSyncing: false });
-        resolve(res || { ok: true });
-      });
-    });
-  },
+  submitPrompt: (_deviceId, prompt, roomCode, roundToken) => command('player:submit-prompt', { prompt, roomCode: roomCode || get().requestedRoomCode, roundToken }),
+  startWithBotsNow: (roomCode) => command('room:start-with-bots', { roomCode: roomCode || get().requestedRoomCode }),
+  resetRoom: (roomCode) => command('room:reset', { roomCode: roomCode || get().requestedRoomCode }),
+  clearRanking: (roomCode) => command('room:clear-ranking', { roomCode: roomCode || get().requestedRoomCode, confirm: true }),
 }));

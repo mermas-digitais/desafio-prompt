@@ -1,387 +1,73 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Shield,
-  X,
-  DoorOpen,
-  DoorClosed,
-  RotateCcw,
-  Trash2,
-  KeyRound,
-  CheckCircle2,
-  AlertTriangle,
-  QrCode,
-  Sparkles,
-  Layers,
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import type { StaffUser } from '../../../shared/types';
 import { useGameStore } from '../../store/useGameStore';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useRoomAccess } from '../../hooks/useRoomAccess';
+import { api } from '../../lib/api';
+import { AccessibleDialog } from '../AccessibleDialog';
 
-export interface TVModerationModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  currentRoomCode: string;
-}
+export interface TVModerationModalProps { isOpen: boolean; onClose: () => void; currentRoomCode: string }
+const button = 'min-h-11 px-4 py-2 rounded-xl border border-[#DDC7F8] bg-white hover:bg-[#FAF5FF] disabled:opacity-50 text-left';
+type Operator = Pick<StaffUser, 'id' | 'name' | 'email' | 'role'>;
 
-const PRESET_SESSION_NAMES = [
-  'Palco Principal MDX',
-  'Arena de Batalhas 1',
-  'Arena de Batalhas 2',
-  'Estande Mermãs Digitais',
-  'Workshop STEAM & Prompt',
-];
-
-const SAVED_PW_KEY = 'mdx26_admin_password';
-
-export const TVModerationModal: React.FC<TVModerationModalProps> = ({
-  isOpen,
-  onClose,
-  currentRoomCode,
-}) => {
-  const roomState = useGameStore((s) => s.roomState);
-  const openRoom = useGameStore((s) => s.openRoom);
-  const closeRoom = useGameStore((s) => s.closeRoom);
-  const resetRoom = useGameStore((s) => s.resetRoom);
-  const clearRanking = useGameStore((s) => s.clearRanking);
-
-  const [password, setPassword] = useState(() => {
-    return localStorage.getItem(SAVED_PW_KEY) || 'mdx2026';
-  });
-  const [sessionName, setSessionName] = useState(() => roomState.roomName || 'Arena MDX Principal');
-  const [roomCodeInput, setRoomCodeInput] = useState(() => currentRoomCode || 'MDX26');
-  const [isLoading, setIsLoading] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
+export const TVModerationModal: React.FC<TVModerationModalProps> = ({ isOpen, onClose, currentRoomCode }) => {
+  const { user, room, canManage, refresh } = useRoomAccess(currentRoomCode);
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [name, setName] = useState('');
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [confirmAction, setConfirmAction] = useState<{ label: string; text: string; action: () => Promise<void> } | null>(null);
+  useEffect(() => { setName(room?.roomName || currentRoomCode); }, [room?.roomName, currentRoomCode]);
   useEffect(() => {
-    if (roomState.roomName) {
-      setSessionName(roomState.roomName);
-    }
-  }, [roomState.roomName]);
-
-  if (!isOpen) return null;
-
-  const handleOpenOrUpdateSession = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password.trim()) {
-      setFeedback({ type: 'error', message: 'Digite a senha de moderador.' });
-      return;
-    }
-    if (!sessionName.trim()) {
-      setFeedback({ type: 'error', message: 'Informe um nome para a sessão da TV.' });
-      return;
-    }
-
-    setIsLoading(true);
-    setFeedback(null);
-    try {
-      const res = await openRoom({
-        roomCode: (roomCodeInput.trim() || 'MDX26').toUpperCase(),
-        name: sessionName.trim(),
-        password: password.trim(),
-      });
-
-      if (res.ok) {
-        localStorage.setItem(SAVED_PW_KEY, password.trim());
-        setFeedback({
-          type: 'success',
-          message: `Sessão "${sessionName.trim()}" declarada como ABERTA com sucesso!`,
-        });
-        setTimeout(() => {
-          onClose();
-        }, 1200);
-      } else {
-        setFeedback({
-          type: 'error',
-          message: res.error || 'Senha incorreta ou erro ao abrir sala.',
-        });
-      }
-    } catch (err: unknown) {
-      setFeedback({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Erro ao conectar ao servidor.',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    setTarget(''); setConfirmAction(null); setError(''); setNotice('');
+    if (!isOpen || !user || user.mustChangePassword) return;
+    let active = true;
+    api<{ users: Operator[] }>('/api/users').then((data) => { if (active) setOperators(data.users); }).catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [isOpen, user?.id, user?.mustChangePassword, currentRoomCode]);
+  useEffect(() => { if (!canManage) setConfirmAction(null); }, [canManage]);
+  const execute = async (action: () => Promise<void>) => {
+    if (busy || !canManage) return;
+    setBusy(true); setError(''); setNotice(''); setConfirmAction(null);
+    try { await action(); await refresh(); await useAuthStore.getState().refresh(); setNotice(`Ação concluída na sala ${currentRoomCode}.`); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível concluir. Atualize antes de repetir.'); }
+    finally { setBusy(false); }
   };
-
-  const handleCloseSession = async () => {
-    if (!password.trim()) {
-      setFeedback({ type: 'error', message: 'Digite a senha de moderador.' });
-      return;
-    }
-    if (
-      !confirm(
-        'Tem certeza que deseja FECHAR esta sala? O QR Code será ocultado e novas entradas de celular serão bloqueadas.'
-      )
-    ) {
-      return;
-    }
-
-    setIsLoading(true);
-    setFeedback(null);
-    try {
-      const res = await closeRoom({
-        roomCode: (roomCodeInput.trim() || currentRoomCode || 'MDX26').toUpperCase(),
-        password: password.trim(),
-      });
-      if (res.ok) {
-        localStorage.setItem(SAVED_PW_KEY, password.trim());
-        setFeedback({
-          type: 'success',
-          message: 'Sala FECHADA com sucesso! O QR Code foi ocultado.',
-        });
-      } else {
-        setFeedback({
-          type: 'error',
-          message: res.error || 'Erro ao fechar sala. Verifique a senha.',
-        });
-      }
-    } catch (err: unknown) {
-      setFeedback({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Erro ao conectar ao servidor.',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+  const requireSuccess = async (action: Promise<{ ok: boolean; error?: string }>) => {
+    const result = await action; if (!result.ok) throw new Error(result.error || 'Ação recusada. Atualize a sala.');
   };
-
-  const handleResetCurrentRound = async () => {
-    if (!confirm('Deseja reiniciar a rodada atual? Um novo QR Code exclusivo será gerado no telão.')) {
-      return;
-    }
-    setIsLoading(true);
-    try {
-      await resetRoom(roomCodeInput);
-      setFeedback({
-        type: 'success',
-        message: 'Rodada reiniciada e novo QR Code gerado!',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleClearRankings = async () => {
-    if (
-      !confirm(
-        'ATENÇÃO: Tem certeza que deseja zerar os placares de ranking desta sala? Esta ação é irreversível.'
-      )
-    ) {
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const res = await clearRanking(password, roomCodeInput);
-      if (res.ok) {
-        setFeedback({ type: 'success', message: 'Ranking limpo com sucesso!' });
-      } else {
-        setFeedback({ type: 'error', message: res.error || 'Erro ao limpar ranking.' });
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 16 }}
-          className="bg-white rounded-3xl p-6 lg:p-7 max-w-lg w-full border-2 border-[#DDC7F8] shadow-2xl flex flex-col gap-5 relative text-[#330043]"
-        >
-          {/* BOTÃO FECHAR */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute top-5 right-5 w-8 h-8 rounded-full bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#E9D8FD] flex items-center justify-center text-[#6E4F7D] cursor-pointer transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-
-          {/* CABEÇALHO */}
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#9747FF] to-[#D01F6B] text-white flex items-center justify-center shadow-md">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-display text-xl text-[#330043]">Painel de Moderação</h3>
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    roomState.isOpen
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                      : 'bg-amber-50 border-amber-200 text-amber-700'
-                  }`}
-                >
-                  {roomState.isOpen ? '🟢 Sala Aberta' : '🔴 Sala Fechada'}
-                </span>
-              </div>
-              <p className="text-xs text-[#6E4F7D]">
-                Controle a sessão da TV, declare a sala aberta e gerencie QR Codes.
-              </p>
-            </div>
-          </div>
-
-          {/* FEEDBACK MENSAGEM */}
-          {feedback && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`p-3 rounded-2xl text-xs font-semibold flex items-center gap-2 border ${
-                feedback.type === 'success'
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                  : 'bg-red-50 border-red-200 text-red-800'
-              }`}
-            >
-              {feedback.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-              ) : (
-                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
-              )}
-              <span>{feedback.message}</span>
-            </motion.div>
-          )}
-
-          {/* FORMULÁRIO DE ABERTURA / CONFIGURAÇÃO DE SESSÃO */}
-          <form onSubmit={handleOpenOrUpdateSession} className="flex flex-col gap-4">
-            {/* SENHA DE MODERADOR */}
-            <div>
-              <label className="block text-xs font-bold text-[#4A3B52] mb-1 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-[#9747FF]" />
-                <span>Senha do Moderador</span>
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Padrão: mdx2026"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-[#DDC7F8] bg-[#FAF7FF] text-sm text-[#330043] focus:outline-hidden focus:border-[#9747FF]"
-              />
-            </div>
-
-            {/* CÓDIGO DA SALA E NOME DA SESSÃO */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-1">
-                <label className="block text-xs font-bold text-[#4A3B52] mb-1">
-                  Código Sala
-                </label>
-                <input
-                  type="text"
-                  value={roomCodeInput}
-                  onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                  placeholder="MDX26"
-                  maxLength={12}
-                  className="w-full px-3 py-2 rounded-xl border border-[#DDC7F8] bg-[#FAF7FF] text-xs font-mono font-bold text-[#330043] uppercase text-center focus:outline-hidden focus:border-[#9747FF]"
-                />
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-[#4A3B52] mb-1">
-                  Nome da Sessão / Local
-                </label>
-                <input
-                  type="text"
-                  value={sessionName}
-                  onChange={(e) => setSessionName(e.target.value)}
-                  placeholder="Ex: Palco Principal"
-                  className="w-full px-3 py-2 rounded-xl border border-[#DDC7F8] bg-[#FAF7FF] text-xs font-semibold text-[#330043] focus:outline-hidden focus:border-[#9747FF]"
-                />
-              </div>
-            </div>
-
-            {/* PILLS DE PRESETS RÁPIDOS */}
-            <div>
-              <span className="block text-[11px] font-bold text-[#6E4F7D] mb-1.5">
-                Sugestões Rápidas de Sessão:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_SESSION_NAMES.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => setSessionName(name)}
-                    className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-colors cursor-pointer ${
-                      sessionName === name
-                        ? 'bg-[#9747FF] text-white border-[#9747FF]'
-                        : 'bg-[#FAF5FF] text-[#6E4F7D] border-[#E9D8FD] hover:bg-[#F3E8FF]'
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* BOTÕES DE ABERTURA / FECHAMENTO DA SALA */}
-            <div className="flex flex-col gap-2 mt-1">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#D01F6B] hover:opacity-95 text-white font-display text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 transition-all"
-              >
-                <DoorOpen className="w-4 h-4" />
-                <span>
-                  {isLoading
-                    ? 'Salvando...'
-                    : roomState.isOpen
-                    ? 'Atualizar Sessão & Manter Aberta'
-                    : '🟢 Declarar Sala Aberta & Liberar QR Code'}
-                </span>
-              </button>
-
-              {roomState.isOpen && (
-                <button
-                  type="button"
-                  onClick={handleCloseSession}
-                  disabled={isLoading}
-                  className="w-full py-2.5 px-4 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-display text-xs lg:text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-colors shadow-2xs"
-                >
-                  <DoorClosed className="w-4 h-4 text-amber-700" />
-                  <span>🔒 Fechar Sala (Ocultar QR Code e Pausar Entradas)</span>
-                </button>
-              )}
-            </div>
+  const selected = operators.find((operator) => operator.id === target);
+  const owner = operators.find((operator) => operator.id === room?.moderatorId);
+  return <AccessibleDialog open={isOpen} title={`Moderação · ${currentRoomCode}`} onClose={onClose}>
+    <div className="space-y-5">
+      <p className="text-sm break-words">Sala: <strong>{room?.roomName || currentRoomCode}</strong> · {room?.isOpen ? 'Entradas abertas' : 'Entradas fechadas'}<br />Responsável: {owner?.name || room?.moderatorId || 'Não informado'}</p>
+      {error && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-800">{error}</p>}
+      {notice && <p role="status" className="p-3 rounded-xl bg-emerald-50 text-emerald-900">{notice}</p>}
+      {!canManage ? <div className="space-y-3"><p>{user?.mustChangePassword ? 'Conclua a troca inicial da senha para moderar.' : user ? 'Modo de visualização. Apenas o responsável da sala ou um administrador pode alterar esta sessão.' : 'Modo de visualização. Entre com sua conta da organização para moderar suas salas.'}</p><Link to="/admin" className={button}>Ir para minha conta</Link></div> : <>
+        {confirmAction ? <section className="space-y-4 border border-amber-300 rounded-xl p-4">
+          <h3 className="font-semibold">{confirmAction.label}</h3><p>{confirmAction.text}</p>
+          <div className="flex flex-wrap gap-3"><button autoFocus className={button} onClick={() => setConfirmAction(null)}>Cancelar</button><button className={`${button} text-red-800`} disabled={busy} onClick={() => void execute(confirmAction.action)}>Confirmar — {currentRoomCode}</button></div>
+        </section> : <>
+          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); setConfirmAction({ label: `Abrir entradas — ${currentRoomCode}`, text: `A sala ${currentRoomCode} receberá novas participantes e usará o nome “${name.trim()}”. A rodada atual será preservada.`, action: async () => { await api('/api/rooms/open', { roomCode: currentRoomCode, name: name.trim() }); } }); }}>
+            <label className="block">Nome da sessão<input required maxLength={80} className="mermas-input w-full px-3 py-3 text-base" value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <button className={`${button} w-full`} disabled={busy}>{room?.isOpen ? 'Atualizar nome e manter entradas abertas' : 'Abrir entradas desta sala'}</button>
           </form>
-
-          {/* CONTROLES RÁPIDOS DA SESSÃO */}
-          <div className="pt-3 border-t border-[#F0E6FF] flex flex-col gap-2">
-            <span className="text-[11px] font-bold text-[#6E4F7D] uppercase tracking-wider">
-              Ações Rápidas de Moderação
-            </span>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={handleResetCurrentRound}
-                disabled={isLoading}
-                className="py-2.5 px-3 rounded-xl bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-[#9747FF]" />
-                <span>Novo QR Code / Reset</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleClearRankings}
-                disabled={isLoading}
-                className="py-2.5 px-3 rounded-xl bg-white hover:bg-red-50 border border-red-200 text-xs font-semibold text-red-700 flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                <span>Zerar Ranking</span>
-              </button>
-            </div>
-
-            <div className="text-[10px] text-[#8C7A99] text-center mt-1 flex items-center justify-center gap-2">
-              <span>Token Rodada: <code className="font-mono">{roomState.roundToken || 'none'}</code></span>
-              <span>•</span>
-              <span>Sala: <strong className="font-mono">{roomState.roomCode}</strong></span>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
-  );
+          {room?.isOpen && <button className={`${button} w-full`} disabled={busy} onClick={() => setConfirmAction({ label: `Fechar entradas — ${currentRoomCode}`, text: `Novas participantes não entrarão em ${currentRoomCode}. A rodada atual e quem já participa continuam normalmente. Não cancela a rodada.`, action: async () => { await api('/api/rooms/close', { roomCode: currentRoomCode }); } })}>Fechar entradas · preservar rodada</button>}
+          <section className="border-t border-[#DDC7F8] pt-4 space-y-3">
+            <h3 className="font-semibold">Responsabilidade da sala</h3>
+            <label className="block">Novo responsável<select className="mermas-input w-full px-3 py-3 text-base" value={target} onChange={(event) => setTarget(event.target.value)}><option value="">Selecione um operador</option>{operators.filter((operator) => operator.id !== room?.moderatorId).map((operator) => <option key={operator.id} value={operator.id}>{operator.name} ({operator.email})</option>)}</select></label>
+            <button className={`${button} w-full`} disabled={busy || !selected} onClick={() => { if (selected) setConfirmAction({ label: `Transferir ${currentRoomCode} para ${selected.name}`, text: `${selected.name} (${selected.email}) assumirá a sala ${currentRoomCode}. O responsável anterior perderá os controles imediatamente, exceto se for administrador global.`, action: async () => { await api('/api/rooms/transfer', { roomCode: currentRoomCode, moderatorId: selected.id }); await refresh(); await useAuthStore.getState().refresh(); } }); }}>Transferir responsabilidade…</button>
+          </section>
+          <section className="border-t border-[#DDC7F8] pt-4 space-y-3">
+            <h3 className="font-semibold">Ações sobre a rodada e o ranking</h3>
+            <button className={`${button} w-full`} disabled={busy} onClick={() => setConfirmAction({ label: `Cancelar rodada — ${currentRoomCode}`, text: `A rodada atual de ${currentRoomCode} será cancelada. Palpites e avaliações pendentes desta rodada serão descartados, e um novo QR será gerado.`, action: () => requireSuccess(useGameStore.getState().resetRoom(currentRoomCode)) })}>Cancelar rodada e gerar novo QR…</button>
+            <button className={`${button} w-full text-red-800`} disabled={busy} onClick={() => setConfirmAction({ label: `Zerar ranking — ${currentRoomCode}`, text: `Os placares de ${currentRoomCode} serão zerados de forma irreversível, e a rodada atual será cancelada. Outras salas não serão alteradas.`, action: () => requireSuccess(useGameStore.getState().clearRanking(currentRoomCode)) })}>Zerar ranking desta sala…</button>
+          </section>
+        </>}
+      </>}
+    </div>
+  </AccessibleDialog>;
 };

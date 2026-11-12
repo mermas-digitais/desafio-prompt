@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AccessibleDialog } from '../AccessibleDialog';
 import { Crown, Gamepad2, Sparkles, Trophy, X, Zap } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { usePlayerSessionStore } from '../../store/usePlayerSessionStore';
@@ -24,15 +24,9 @@ export const PlayImageZoomModal: React.FC = React.memo(() => {
   const imageUrl = challenge ? resolveChallengeImageUrl(challenge.id, challenge.imageUrl) : null;
 
   return (
-    <AnimatePresence>
-      {isZoomOpen && imageUrl && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={() => setIsZoomOpen(false)}
-          className="fixed inset-0 z-50 bg-[#330043]/80 backdrop-blur-sm p-4 flex flex-col items-center justify-center"
-        >
+    <AccessibleDialog open={Boolean(isZoomOpen && imageUrl)} title="Imagem ampliada" onClose={() => setIsZoomOpen(false)}>
+      {imageUrl && (
+        <div>
           <button
             type="button"
             onClick={() => setIsZoomOpen(false)}
@@ -46,9 +40,9 @@ export const PlayImageZoomModal: React.FC = React.memo(() => {
             decoding="async"
             className="max-w-full max-h-[80vh] rounded-3xl border-2 border-white shadow-2xl object-contain"
           />
-        </motion.div>
+        </div>
       )}
-    </AnimatePresence>
+    </AccessibleDialog>
   );
 });
 
@@ -64,15 +58,10 @@ export const PlayRankingModal: React.FC = React.memo(() => {
   const movementsByPlayer = useLeaderboardMovements(leaderboards, mobileRankingTab);
 
   return (
-    <AnimatePresence>
+    <AccessibleDialog open={isRankingModalOpen} title="Ranking Mermãs Digitais" onClose={() => setIsRankingModalOpen(false)}>
       {isRankingModalOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-[#330043]/40 backdrop-blur-xs p-4 flex items-center justify-center"
-        >
-          <div className="mermas-card max-w-md w-full max-h-[85vh] p-5 flex flex-col overflow-hidden">
+        <div>
+          <div className="w-full flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-[#DDC7F8]">
               <div className="flex items-center gap-2">
                 <Crown className="w-5 h-5 text-[#FF4A97]" />
@@ -80,6 +69,7 @@ export const PlayRankingModal: React.FC = React.memo(() => {
               </div>
               <button
                 type="button"
+                aria-label="Fechar ranking"
                 onClick={() => setIsRankingModalOpen(false)}
                 className="buttonCircle w-8 h-8 cursor-pointer"
               >
@@ -98,6 +88,7 @@ export const PlayRankingModal: React.FC = React.memo(() => {
                 <button
                   key={t.id}
                   type="button"
+                  aria-pressed={mobileRankingTab === t.id}
                   onClick={() => setMobileRankingTab(t.id)}
                   className={`py-2 px-2 rounded-xl font-quicksand font-bold text-xs border inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
                     mobileRankingTab === t.id
@@ -212,8 +203,8 @@ export const PlayRankingModal: React.FC = React.memo(() => {
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
-    </AnimatePresence>
+    </AccessibleDialog>
   );
 });

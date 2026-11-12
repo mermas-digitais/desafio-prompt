@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { getOrCreateDeviceId } from './useGameStore';
 import type { AvatarId, ExpiredRoundSummary, PlayerProfile, RankingTab } from '../../shared/types';
 
 function getStoredNickname(): string {
@@ -51,7 +50,7 @@ interface PlayerSessionState {
 }
 
 export const usePlayerSessionStore = create<PlayerSessionState>((set) => ({
-  deviceId: getOrCreateDeviceId(),
+  deviceId: '',
   profile: null,
   nickname: getStoredNickname(),
   selectedAvatar: getStoredAvatar(),

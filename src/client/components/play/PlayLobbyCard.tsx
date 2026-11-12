@@ -6,10 +6,10 @@ import { formatTimer } from '../../helpers/formatters';
 import { AvatarBadge } from '../AvatarBadge';
 import { BadgeVectorIcon } from '../BadgeVectorIcon';
 import { getPlayerPowerTier, type PlayerPowerTierInfo } from '../../../shared/achievements';
-import { ALL_PLAYER_SLOTS, MAX_ROOM_PLAYERS, type RoomPlayer } from '../../../shared/types';
+import { ALL_PLAYER_SLOTS, MAX_ROOM_PLAYERS, type PublicRoomPlayer } from '../../../shared/types';
 
 export interface PlayLobbyCardProps {
-  myRoomSlot: RoomPlayer;
+  myRoomSlot: PublicRoomPlayer;
   myPowerTier: PlayerPowerTierInfo;
   onLeaveRoom: () => void;
 }

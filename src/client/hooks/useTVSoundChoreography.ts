@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
-import { getPromptWordCount } from '../helpers/formatters';
 import { preloadChallengeImage } from '../helpers/imageHelpers';
 import {
   playJoinSound,
@@ -15,12 +14,11 @@ import {
   playVictoryFanfare,
   playWordRevealSparkleSound,
   playTimeMilestoneSound,
-  playLayerCompleteSound,
   playAllLockedSound,
   playAiThinkingSound,
   fireCelebrationConfetti,
 } from '../lib/soundEngine';
-import type { RoomPlayer } from '../../shared/types';
+import type { PublicRoomPlayer } from '../../shared/types';
 
 export function useTVSoundChoreography() {
   const roomState = useGameStore((s) => s.roomState);
@@ -30,13 +28,11 @@ export function useTVSoundChoreography() {
   const setHintUnlockBanner = useTVUiStore((s) => s.setHintUnlockBanner);
 
   const prevPhaseRef = useRef(roomState.phase);
-  const prevPlayersRef = useRef<RoomPlayer[]>(roomState.players);
+  const prevPlayersRef = useRef<PublicRoomPlayer[]>(roomState.players);
   const prevHintsCountRef = useRef(roomState.challenge?.unlockedHints.length || 0);
   const prevRevealedTokensRef = useRef(0);
   const prevCountdownRef = useRef(roomState.countdownLeft);
   const prevRoundTimeRef = useRef(roomState.roundTimeLeft);
-  const prevTotalWordsRef = useRef(0);
-  const prevSlotStageRef = useRef<Record<number, number>>({});
 
   // Pré-carrega a imagem do desafio assim que a sala entra em COUNTDOWN ou PLAYING
   useEffect(() => {
@@ -75,14 +71,6 @@ export function useTVSoundChoreography() {
           setLiveLockToast(`${p.nickname} travou o prompt aos ${sec}s! A pressão aumentou!`);
         }
 
-        // Som quando um participante completa uma camada de estruturação do prompt (5, 11, 16 palavras)
-        const wc = getPromptWordCount(p.submittedPrompt);
-        const stage = wc >= 16 ? 3 : wc >= 11 ? 2 : wc >= 5 ? 1 : 0;
-        const prevStage = prevSlotStageRef.current[p.slot] || 0;
-        if (stage > prevStage && !p.hasLockedPrompt) {
-          playLayerCompleteSound(stage as 1 | 2 | 3);
-        }
-        prevSlotStageRef.current[p.slot] = stage;
       });
 
       // Se todos os 3 participantes da sala acabaram de travar seus prompts antes do tempo zerar
@@ -94,14 +82,9 @@ export function useTVSoundChoreography() {
         setTimeout(() => playAllLockedSound(), 180);
       }
 
-      const currentTotalWords = roomState.players.reduce(
-        (acc, p) => acc + getPromptWordCount(p.submittedPrompt),
-        0
-      );
-      if (currentTotalWords > prevTotalWordsRef.current) {
+      if (roomState.players.some((player) => player.isTyping && !prevPlayers.find((old) => old.id === player.id)?.isTyping)) {
         playTypingPulseSound();
       }
-      prevTotalWordsRef.current = currentTotalWords;
 
       // Detecta desembaçamento progressivo de palavras do prompt original na TV
       const revealedCount =
@@ -111,9 +94,7 @@ export function useTVSoundChoreography() {
       }
       prevRevealedTokensRef.current = revealedCount;
     } else {
-      prevTotalWordsRef.current = 0;
       prevRevealedTokensRef.current = 0;
-      prevSlotStageRef.current = {};
     }
 
     prevPlayersRef.current = roomState.players;

@@ -45,6 +45,8 @@ export class GameEngine {
   private roundId: string;
   private roundToken: string;
   private completedRounds = new Map<string, ExpiredRoundSummary>();
+  private generation = 0;
+  private blockedProfiles = new Set<string>();
 
   private phase: GamePhase = 'IDLE';
   private lobbyTimeLeft = 90;
@@ -68,6 +70,7 @@ export class GameEngine {
   private tickInterval: NodeJS.Timeout | null = null;
   private botSchedules: BotTargetSchedule[] = [];
   private isEvaluating = false;
+  private committingRounds = 0;
 
   constructor(
     io: SocketIOServer,
@@ -84,6 +87,8 @@ export class GameEngine {
   }
 
   public generateNewRoundToken(): string {
+    this.generation += 1;
+    this.blockedProfiles.clear();
     this.roundId = `rnd_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
     this.roundToken = `rt_${this.roomCode.toLowerCase()}_${this.roundId}`;
     return this.roundToken;
@@ -105,6 +110,9 @@ export class GameEngine {
       winnerScore: winner ? winner.totalScore : null,
       evaluations: [...this.evaluations],
     });
+    while (this.completedRounds.size > 100) {
+      this.completedRounds.delete(this.completedRounds.keys().next().value!);
+    }
   }
 
   public validateRoundToken(token?: string): {
@@ -165,14 +173,12 @@ export class GameEngine {
       this.roomName = params.name.trim();
     }
     this.isOpen = true;
-    this.generateNewRoundToken();
     this.broadcastState();
     return { ok: true };
   }
 
   public closeRoom(): void {
     this.isOpen = false;
-    this.resetToIdle();
     this.broadcastState();
   }
 
@@ -189,6 +195,7 @@ export class GameEngine {
     if (idx === -1) return { kicked: false };
 
     const removed = this.players.splice(idx, 1)[0];
+    this.blockedProfiles.add(removed.id);
     if (removed.socketId) {
       this.io.to(removed.socketId).emit('player:kicked', {
         reason,
@@ -200,7 +207,9 @@ export class GameEngine {
     if (this.phase === 'LOBBY' || this.phase === 'IDLE') {
       const remainingHumans = this.players.filter((p) => !p.isBot);
       if (remainingHumans.length === 0) {
-        this.resetToIdle();
+        this.phase = 'IDLE';
+        this.players = [];
+        this.broadcastState();
         return { kicked: true, player: removed };
       }
     }
@@ -217,6 +226,20 @@ export class GameEngine {
     this.tickInterval = setInterval(() => {
       this.tick().catch((err) => console.error('❌ [GameEngine] Erro no tick:', err));
     }, 1000);
+  }
+
+  public dispose(): void {
+    if (this.tickInterval) clearInterval(this.tickInterval);
+    this.tickInterval = null;
+    this.generation += 1;
+  }
+
+  public isEvaluatingRound(): boolean {
+    return this.isEvaluating;
+  }
+
+  public isCommittingRound(): boolean {
+    return this.committingRounds > 0;
   }
 
   private refillAndShuffleDeck(): void {
@@ -278,7 +301,7 @@ export class GameEngine {
         }
 
         tokens.push({
-          text: word,
+          text: isRevealed ? word : '',
           isRevealed,
           layer,
         });
@@ -344,7 +367,8 @@ export class GameEngine {
       roundTimeLeft: this.roundTimeLeft,
       countdownLeft: this.countdownLeft,
       blurPx: this.blurPx,
-      players: [...this.players].sort((a, b) => a.slot - b.slot),
+      players: [...this.players].sort((a, b) => a.slot - b.slot)
+        .map(({ deviceId, socketId, submittedPrompt, ...player }) => player),
       challenge: this.buildChallengePublicView(),
       evaluations: this.evaluations,
       currentRevealIndex: this.currentRevealIndex,
@@ -356,9 +380,6 @@ export class GameEngine {
   public broadcastState(): void {
     const state = this.getState();
     this.io.to(this.roomCode).emit('room:state', state);
-    if (this.roomCode === 'MDX26') {
-      this.io.emit('room:state', state);
-    }
   }
 
   public async refreshLeaderboards(): Promise<LeaderboardsPayload> {
@@ -379,7 +400,11 @@ export class GameEngine {
     roundData?: ExpiredRoundSummary;
     state: GameRoomState;
   } {
-    if (!this.isOpen) {
+    const existing = this.players.find((p) => p.id === profile.id && p.deviceId === profile.deviceId);
+    if (this.blockedProfiles.has(profile.id)) {
+      return { joined: false, reason: 'Você foi removido desta rodada.', state: this.getState() };
+    }
+    if (!this.isOpen && !existing) {
       return {
         joined: false,
         reason: 'Esta sala ainda não foi declarada aberta pelo moderador na TV.',
@@ -387,8 +412,8 @@ export class GameEngine {
       };
     }
 
-    if (roundToken && roundToken !== this.roundToken) {
-      const archived = this.completedRounds.get(roundToken);
+    if ((!existing && !roundToken) || (roundToken && roundToken !== this.roundToken)) {
+      const archived = roundToken ? this.completedRounds.get(roundToken) : undefined;
       return {
         joined: false,
         expired: true,
@@ -398,7 +423,6 @@ export class GameEngine {
       };
     }
     // Verifica se o jogador já está em algum slot (reconexão de celular)
-    const existing = this.players.find((p) => p.deviceId === profile.deviceId);
     if (existing) {
       existing.socketId = socketId;
       existing.nickname = profile.nickname;
@@ -482,7 +506,9 @@ export class GameEngine {
       this.players.splice(idx, 1);
       const remainingHumans = this.players.filter((p) => !p.isBot);
       if (remainingHumans.length === 0) {
-        this.resetToIdle();
+        this.phase = 'IDLE';
+        this.players = [];
+        this.broadcastState();
         return;
       }
     } else {
@@ -525,7 +551,7 @@ export class GameEngine {
     }
 
     const player = this.players.find((p) => p.deviceId === deviceId);
-    if (!player) {
+    if (!player || player.hasLockedPrompt) {
       return { accepted: false, state: this.getState() };
     }
 
@@ -664,6 +690,11 @@ export class GameEngine {
 
   private async transitionToEvaluating(): Promise<void> {
     if (this.isEvaluating || this.phase === 'EVALUATING') return;
+    const generation = this.generation;
+    const roundId = this.roundId;
+    const roundToken = this.roundToken;
+    const isCurrent = () => this.generation === generation && this.roundId === roundId;
+    let committing = false;
     this.isEvaluating = true;
     this.phase = 'EVALUATING';
     this.blurPx = 0;
@@ -687,11 +718,28 @@ export class GameEngine {
 
     try {
       const challenge = this.currentChallenge ?? this.pickNextChallenge();
-      const evaluations = await evaluateRoundPrompts(this.players, challenge);
+      const players = this.players.map((player) => ({ ...player }));
+      const evaluations = await evaluateRoundPrompts(players, challenge);
+      if (!isCurrent()) return;
 
-      // Salva estatísticas no banco para jogadoras humanas e atualiza isNewHighScore + Conquistas & Título
+      const winnerEval = evaluations.find((ev) => ev.isWinner);
+      const humanStats = evaluations.flatMap((ev) => {
+        const player = players.find((p) => p.id === ev.playerId);
+        if (!player) throw new Error('Avaliação sem participante da rodada.');
+        return player.isBot ? [] : [{ deviceId: player.deviceId, roundScore: ev.totalScore, isWinner: ev.isWinner }];
+      });
+      this.committingRounds += 1;
+      committing = true;
+      const committedEvaluations = await database.commitRound({
+        roomCode: this.roomCode,
+        roundId,
+        roundToken,
+        challengeId: challenge.id,
+        winnerPlayerId: winnerEval && !winnerEval.isBot ? winnerEval.playerId : null,
+        players: humanStats,
+      }, (updates) => {
       for (const ev of evaluations) {
-        const roomPlayer = this.players.find((p) => p.slot === ev.slot);
+        const roomPlayer = players.find((p) => p.id === ev.playerId);
         if (roomPlayer && !roomPlayer.isBot) {
           const prevTier = getPlayerPowerTier({
             highScore: roomPlayer.highScore,
@@ -700,15 +748,13 @@ export class GameEngine {
             matchesPlayed: roomPlayer.matchesPlayed,
           });
 
-          const { newHighScore, updatedProfile } = await database.recordPlayerRoundStats({
-            deviceId: roomPlayer.deviceId,
-            roundScore: ev.totalScore,
-            isWinner: ev.isWinner,
-          });
+          const update = updates.get(roomPlayer.deviceId);
+          if (!update) throw new Error('Estatísticas ausentes para participante da rodada.');
+          const { newHighScore, updatedProfile } = update;
           ev.isNewHighScore = newHighScore;
 
           const afterHigh = updatedProfile ? updatedProfile.highScore : Math.max(roomPlayer.highScore, ev.totalScore);
-          const afterTotal = updatedProfile ? updatedProfile.totalScore : afterHigh + ev.totalScore;
+          const afterTotal = updatedProfile ? updatedProfile.totalScore : roomPlayer.totalScore + ev.totalScore;
           const afterWins = updatedProfile ? updatedProfile.winsCount : roomPlayer.winsCount + (ev.isWinner ? 1 : 0);
           const afterMatches = updatedProfile ? updatedProfile.matchesPlayed : roomPlayer.matchesPlayed + 1;
 
@@ -770,16 +816,23 @@ export class GameEngine {
         }
       }
 
-      const winnerEval = evaluations.find((e) => e.isWinner);
-      await database.recordMatch({
-        roomCode: this.roomCode,
-        challengeId: challenge.id,
-        winnerPlayerId: winnerEval && !winnerEval.isBot ? winnerEval.playerId : null,
-        results: evaluations,
+        return evaluations;
       });
+      if (!isCurrent()) return;
+      for (const snapshot of players) {
+        const currentPlayer = this.players.find((p) => p.id === snapshot.id);
+        if (currentPlayer) {
+          currentPlayer.highScore = snapshot.highScore;
+          currentPlayer.totalScore = snapshot.totalScore;
+          currentPlayer.matchesPlayed = snapshot.matchesPlayed;
+          currentPlayer.winsCount = snapshot.winsCount;
+        }
+      }
 
-      this.evaluations = evaluations;
-      this.leaderboards = await database.getLeaderboards(100, this.roomCode);
+      const leaderboards = await database.getLeaderboards(100, this.roomCode);
+      if (!isCurrent()) return;
+      this.evaluations = committedEvaluations;
+      this.leaderboards = leaderboards;
 
       // Entra na fase REVEALING (1 por 1, ritmo ágil: 4s por participante para manter dinamismo na TV)
       this.phase = 'REVEALING';
@@ -787,10 +840,12 @@ export class GameEngine {
       this.revealStepTimer = 4;
       this.broadcastState();
     } catch (err) {
+      if (!isCurrent()) return;
       console.error('❌ [GameEngine] Falha durante avaliação da rodada:', err);
       this.resetToIdle();
     } finally {
-      this.isEvaluating = false;
+      if (committing) this.committingRounds -= 1;
+      if (isCurrent()) this.isEvaluating = false;
     }
   }
 

@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import { useGameStore } from '../store/useGameStore';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { ensurePlayerSession, useGameStore } from '../store/useGameStore';
+import { selectOwnEvaluation, selectOwnPlayer } from '../lib/sessionHelpers';
+import { useSearch } from '@tanstack/react-router';
 import { usePlayerSessionStore } from '../store/usePlayerSessionStore';
 import { DEFAULT_CREATIVE_SUGGESTIONS } from '../helpers/formatters';
 import { resizeImageToSquareDataUrl } from '../helpers/imageHelpers';
@@ -24,7 +26,7 @@ import {
 
 export function useMobilePlayerSession() {
   const roomState = useGameStore((s) => s.roomState);
-  const initSocketConnection = useGameStore((s) => s.initSocketConnection);
+  const isConnected = useGameStore((s) => s.isConnected);
   const identifyDevice = useGameStore((s) => s.identifyDevice);
   const registerPlayer = useGameStore((s) => s.registerPlayer);
   const joinRoom = useGameStore((s) => s.joinRoom);
@@ -62,28 +64,39 @@ export function useMobilePlayerSession() {
 
   const prevWordCountRef = useRef<number>(0);
 
-  const searchParams =
-    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const currentUrlRoom = (searchParams?.get('room') || 'MDX26').toUpperCase().trim();
-  const currentUrlRound = (searchParams?.get('round') || '').trim();
+  const search = useSearch({ strict: false }) as { room?: string; round?: string };
+  const currentUrlRoom = (search.room || 'MDX26').toUpperCase().trim();
+  const currentUrlRound = (search.round || '').trim();
 
   useEffect(() => {
-    initSocketConnection();
-    // Conecta o socket à sala indicada na URL
-    useGameStore.getState().joinSessionRoom(currentUrlRoom);
-  }, [initSocketConnection, currentUrlRoom]);
+    let active = true;
+    usePlayerSessionStore.setState({ profile: null, promptText: '', isLocallyUnlocked: false, isExpiredQr: false, expiredRoundData: null, isEditingProfile: false, isZoomOpen: false, isRankingModalOpen: false, errorMsg: null });
+    ensurePlayerSession().then(async (id) => {
+      if (!active) return;
+      usePlayerSessionStore.setState({ deviceId: id });
+      useGameStore.getState().joinSessionRoom(currentUrlRoom);
+      const response = await identifyDevice(id, currentUrlRoom);
+      if (!active) return;
+      if (response.ok && response.profile) syncFromServerProfile(response.profile);
+      else setProfile(null);
+    }).catch((error) => { if (active) setErrorMsg(error instanceof Error ? error.message : 'Não foi possível iniciar sua sessão privada. Recarregue a página.'); });
+    return () => { active = false; };
+  }, [currentUrlRoom, identifyDevice, syncFromServerProfile, setProfile, setErrorMsg]);
 
   // Valida o QR code / token de rodada via API
   useEffect(() => {
+    const controller = new AbortController();
     if (currentUrlRound) {
       fetch(
         `/api/rounds/validate?room=${encodeURIComponent(currentUrlRoom)}&round=${encodeURIComponent(
           currentUrlRound
-        )}`
+        )}`, { signal: controller.signal }
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((res) => {
-          if (res && res.status === 'EXPIRED') {
+          if (res && res.status === 'ROOM_CLOSED') {
+            setErrorMsg('As entradas desta sala estão fechadas. Quem já participa pode continuar.');
+          } else if (res && res.status === 'EXPIRED') {
             setIsExpiredQr(true);
             if (res.roundData) setExpiredRoundData(res.roundData);
           } else if (res && res.status === 'ACTIVE') {
@@ -91,42 +104,29 @@ export function useMobilePlayerSession() {
             setExpiredRoundData(null);
           }
         })
-        .catch(() => {});
+        .catch((error) => { if (!controller.signal.aborted) setErrorMsg('Não foi possível validar o QR. Confira a conexão e recarregue.'); });
     }
-  }, [currentUrlRoom, currentUrlRound, setIsExpiredQr, setExpiredRoundData]);
-
-  // Identifica dispositivo automaticamente ao abrir /play
-  useEffect(() => {
-    identifyDevice(deviceId, currentUrlRoom).then((res) => {
-      if (res?.ok && res.profile) {
-        syncFromServerProfile(res.profile);
-      }
-    });
-  }, [deviceId, currentUrlRoom, identifyDevice, syncFromServerProfile]);
+    return () => controller.abort();
+  }, [currentUrlRoom, currentUrlRound, setIsExpiredQr, setExpiredRoundData, setErrorMsg]);
 
   // Sincroniza estatísticas quando uma rodada termina ou reseta rascunho na contagem
   useEffect(() => {
-    if (
-      roomState.phase === 'REVEALING' ||
-      roomState.phase === 'PODIUM' ||
-      roomState.phase === 'IDLE'
-    ) {
-      identifyDevice(deviceId, currentUrlRoom).then((res) => {
-        if (res?.ok && res.profile) {
-          setProfile(res.profile);
-        }
-      });
-    }
+    if (!deviceId || !isConnected || roomState.roomCode !== currentUrlRoom) return;
+    let active = true;
+    identifyDevice(deviceId, currentUrlRoom).then((res) => {
+      if (active && res?.ok) setProfile(res.profile || null);
+      else if (active && res.error) setErrorMsg(res.error);
+    }).catch((error) => { if (active) setErrorMsg(error.message); });
     if (roomState.phase === 'COUNTDOWN') {
       resetRoundDraft();
       prevWordCountRef.current = 0;
     }
-  }, [roomState.phase, deviceId, currentUrlRoom, identifyDevice, setProfile, resetRoundDraft]);
+    return () => { active = false; };
+  }, [roomState.phase, roomState.roomCode, isConnected, deviceId, currentUrlRoom, identifyDevice, setProfile, resetRoundDraft, setErrorMsg]);
 
-  const myRoomSlot = roomState.players.find((p) => p.deviceId === deviceId);
-  const myEvaluation = roomState.evaluations.find(
-    (ev) => ev.slot === myRoomSlot?.slot || ev.nickname === profile?.nickname
-  );
+  const roomProfile = profile?.roomCode === currentUrlRoom ? profile : null;
+  const myRoomSlot = selectOwnPlayer(roomState, roomProfile);
+  const myEvaluation = selectOwnEvaluation(roomState, roomProfile);
 
   // Tick musical suave nos últimos 5s da partida
   useEffect(() => {
@@ -184,8 +184,11 @@ export function useMobilePlayerSession() {
       setIsSubmittingJoin(true);
 
       try {
+        if (!currentUrlRound && !myRoomSlot) { setErrorMsg('Scanneie o QR Code da rodada no telão para entrar nesta sala.'); return; }
         const regRes = await registerPlayer({
           deviceId,
+          roomCode: currentUrlRoom,
+          roundToken: currentUrlRound,
           nickname: nickname.trim(),
           avatar: selectedAvatar,
         });
@@ -234,6 +237,8 @@ export function useMobilePlayerSession() {
             playJoinSound();
           }
         }
+      } catch (error) {
+        setErrorMsg(error instanceof Error ? error.message : 'Não foi possível entrar. Tente novamente.');
       } finally {
         setIsSubmittingJoin(false);
       }
@@ -245,6 +250,7 @@ export function useMobilePlayerSession() {
       currentUrlRoom,
       currentUrlRound,
       roomState.phase,
+      myRoomSlot,
       registerPlayer,
       joinRoom,
       setErrorMsg,
@@ -283,7 +289,10 @@ export function useMobilePlayerSession() {
 
   const handleLockPrompt = useCallback(async () => {
     if (!promptText.trim()) return;
-    const res = await submitPrompt(deviceId, promptText.trim(), currentUrlRoom, currentUrlRound);
+    // Only an already identified participant may resume without a fresh QR URL.
+    const token = currentUrlRound || (myRoomSlot ? roomState.roundToken : '');
+    if (!token) { setErrorMsg('Escaneie o QR atual do telão antes de enviar um palpite.'); return; }
+    const res = await submitPrompt(deviceId, promptText.trim(), currentUrlRoom, token);
     if (res.ok) {
       setIsLocallyUnlocked(false);
       playLockInSound();
@@ -291,21 +300,21 @@ export function useMobilePlayerSession() {
     } else if (res.error) {
       setErrorMsg(res.error);
     }
-  }, [deviceId, promptText, currentUrlRoom, currentUrlRound, submitPrompt, setIsLocallyUnlocked, setErrorMsg]);
+  }, [deviceId, promptText, currentUrlRoom, currentUrlRound, myRoomSlot, roomState.roundToken, submitPrompt, setIsLocallyUnlocked, setErrorMsg]);
 
   const handleLeaveCurrentRoom = useCallback(async () => {
     return leaveRoom(deviceId, currentUrlRoom);
   }, [deviceId, currentUrlRoom, leaveRoom]);
 
-  const myPowerTier = getPlayerPowerTier(
-    profile || { highScore: 0, totalScore: 0, winsCount: 0, matchesPlayed: 0 }
-  );
-  const myAchievements = getCareerAchievements(profile || {});
+  const myPowerTier = useMemo(() => getPlayerPowerTier(
+    roomProfile || { highScore: 0, totalScore: 0, winsCount: 0, matchesPlayed: 0 }
+  ), [roomProfile]);
+  const myAchievements = useMemo(() => getCareerAchievements(roomProfile || {}), [roomProfile]);
   const isLocked = Boolean(myRoomSlot?.hasLockedPrompt && !isLocallyUnlocked);
 
   return {
     deviceId,
-    profile,
+    profile: roomProfile,
     nickname,
     selectedAvatar,
     isEditingProfile,

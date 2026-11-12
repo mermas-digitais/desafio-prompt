@@ -1,512 +1,138 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  CheckCircle2,
-  Crown,
-  Database,
-  Gamepad2,
-  KeyRound,
-  LogOut,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-  Trophy,
-  Users,
-  Zap,
-} from 'lucide-react';
-import { AvatarBadge } from '../components/AvatarBadge';
-import { BadgeVectorIcon } from '../components/BadgeVectorIcon';
-import { AchievementMarqueeStrip } from '../components/AchievementMarqueeStrip';
-import {
-  getCareerAchievements,
-  getPlayerPowerTier,
-} from '../../shared/achievements';
-import type { AvatarId } from '../../shared/types';
+import type { StaffUser } from '../../shared/types';
+import { useAuthStore } from '../store/useAuthStore';
+import { api } from '../lib/api';
+import type { RoomMetadata } from '../hooks/useRoomAccess';
+import { AccessibleDialog } from '../components/AccessibleDialog';
 
-interface AdminPlayerItem {
-  id: string;
-  deviceId: string;
-  nickname: string;
-  avatar: AvatarId;
-  highScore: number;
-  totalScore: number;
-  matchesPlayed: number;
-  winsCount: number;
-  updatedAt: string;
-}
-
-interface AdminStats {
-  totalPlayers: number;
-  totalMatches: number;
-  highestScoreEver: number;
-}
-
-const ADMIN_SESSION_STORAGE_KEY = 'mdx26_admin_session_pwd';
+interface AdminPlayer { id: string; nickname: string; roomCode: string; highScore: number; totalScore: number; matchesPlayed: number }
+const field = 'mermas-input w-full px-3 py-3 text-base';
+const button = 'min-h-11 px-4 py-2 rounded-xl border border-[#DDC7F8] bg-white hover:bg-[#FAF5FF] disabled:opacity-50';
 
 export const AdminScreen: React.FC = () => {
-  const [passwordInput, setPasswordInput] = useState<string>('');
-  const [savedPassword, setSavedPassword] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return window.sessionStorage.getItem(ADMIN_SESSION_STORAGE_KEY) || '';
-    }
-    return '';
-  });
+  const { user, loaded, refresh, login, logout, changePassword } = useAuthStore();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [rooms, setRooms] = useState<RoomMetadata[]>([]);
+  const [users, setUsers] = useState<Pick<StaffUser, 'id' | 'name' | 'email' | 'role'>[]>([]);
+  const [scope, setScope] = useState('');
+  const [players, setPlayers] = useState<AdminPlayer[]>([]);
+  const [createName, setCreateName] = useState('');
+  const [createEmail, setCreateEmail] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [confirmation, setConfirmation] = useState<{ title: string; text: string; action: () => Promise<void> } | null>(null);
+  const [recovery, setRecovery] = useState<AdminPlayer | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState('');
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [dbVersion, setDbVersion] = useState<string>('PostgreSQL 18');
-  const [players, setPlayers] = useState<AdminPlayerItem[]>([]);
-  const [stats, setStats] = useState<AdminStats>({
-    totalPlayers: 0,
-    totalMatches: 0,
-    highestScoreEver: 0,
-  });
-  const [confirmClearAll, setConfirmClearAll] = useState<boolean>(false);
-  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
-
-  const showFeedback = (msg: string) => {
-    setFeedbackToast(msg);
-    setTimeout(() => {
-      setFeedbackToast((prev) => (prev === msg ? null : prev));
-    }, 3500);
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true); setError(''); setNotice('');
+    try { await action(); } catch (err) { setError(err instanceof Error ? err.message : 'Falha de conexão. Tente novamente.'); }
+    finally { setBusy(false); }
   };
-
-  const fetchAdminData = useCallback(async (pwd: string) => {
-    if (!pwd) return;
-    setIsLoading(true);
-    setAuthError(null);
-    try {
-      const res = await fetch('/api/admin/ranking', {
-        headers: {
-          'x-admin-password': pwd,
-        },
-      });
-      if (!res.ok) {
-        setIsAuthenticated(false);
-        setSavedPassword('');
-        if (typeof window !== 'undefined') {
-          window.sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
-        }
-        setAuthError('Senha administrativa inválida. Verifique ADMIN_PASSWORD no arquivo .env.');
-        return;
-      }
-
-      const data = await res.json();
-      setIsAuthenticated(true);
-      if (data.database) setDbVersion(data.database);
-      if (Array.isArray(data.players)) setPlayers(data.players);
-      if (data.stats) setStats(data.stats);
-    } catch {
-      setAuthError('Erro de conexão com o servidor.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
+  const loadRanking = async (target: string) => {
+    const result = await api<{ players: AdminPlayer[] }>(target === '*' ? '/api/admin/ranking' : `/api/admin/ranking?room=${encodeURIComponent(target)}`);
+    setPlayers(result.players || []);
+  };
+  useEffect(() => { void refresh().catch(() => setError('Não foi possível verificar sua sessão. Recarregue a página.')); }, [refresh]);
   useEffect(() => {
-    if (savedPassword) {
-      fetchAdminData(savedPassword);
-    }
-  }, [savedPassword, fetchAdminData]);
+    setPlayers([]); setUsers([]); setRooms([]); setScope('');
+    if (!user || user.mustChangePassword) return;
+    let active = true;
+    Promise.all([api<{ rooms: RoomMetadata[] }>('/api/rooms'), api<{ users: typeof users }>('/api/users')])
+      .then(([roomData, userData]) => { if (active) { setRooms(roomData.rooms); setUsers(userData.users); } })
+      .catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [user?.id, user?.mustChangePassword]);
+  useEffect(() => {
+    setPlayers([]);
+    if (!scope || !user || user.mustChangePassword) return;
+    let active = true;
+    api<{ players: AdminPlayer[] }>(scope === '*' ? '/api/admin/ranking' : `/api/admin/ranking?room=${encodeURIComponent(scope)}`)
+      .then((data) => { if (active) setPlayers(data.players || []); })
+      .catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [scope, user?.id, user?.mustChangePassword]);
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = passwordInput.trim();
-    if (!trimmed) return;
-
-    setIsLoading(true);
-    setAuthError(null);
-
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: trimmed }),
-      });
-
-      if (!res.ok) {
-        setAuthError('Senha incorreta! Verifique o valor de ADMIN_PASSWORD no .env.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem(ADMIN_SESSION_STORAGE_KEY, trimmed);
-      }
-      setSavedPassword(trimmed);
-      setPasswordInput('');
-    } catch {
-      setAuthError('Falha ao comunicar com o servidor.');
-      setIsLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
-    }
-    setSavedPassword('');
-    setIsAuthenticated(false);
-    setConfirmClearAll(false);
-  };
-
-  const handleClearAllRankings = async () => {
-    if (!savedPassword) return;
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/admin/clear-ranking', {
-        method: 'POST',
-        headers: {
-          'x-admin-password': savedPassword,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPlayers(data.players || []);
-        if (data.stats) setStats(data.stats);
-        setConfirmClearAll(false);
-        showFeedback('Ranking Geral zerado com sucesso no PostgreSQL 18 e atualizado na TV!');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleDeletePlayer = async (player: AdminPlayerItem) => {
-    if (!savedPassword) return;
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/admin/players/${encodeURIComponent(player.id)}`, {
-        method: 'DELETE',
-        headers: {
-          'x-admin-password': savedPassword,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPlayers(data.players || []);
-        if (data.stats) setStats(data.stats);
-        showFeedback(`Participante "${player.nickname}" removida do PostgreSQL 18.`);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen w-full bg-[#FAF7FF] text-[#330043] flex flex-col">
-      {/* Cabeçalho Administrativo */}
-      <header className="w-full bg-white border-b border-[#DDC7F8] px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-        <div className="flex items-center gap-3">
-          <img
-            src="/mermas/logo.svg"
-            alt="Mermãs Digitais"
-            className="h-9 object-contain"
-          />
-          <div className="h-6 w-px bg-[#DDC7F8]" />
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-[#9747FF]" />
-            <span className="font-display text-lg text-[#330043]">
-              Painel Administrativo • Ranking MDX 2026
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {isAuthenticated && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{dbVersion} Conectado</span>
-            </span>
-          )}
-
-          <Link
-            to="/tv"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#DDC7F8] text-xs font-bold text-[#330043] transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-[#9747FF]" />
-            <span>Voltar para Tela da TV</span>
-          </Link>
-
-          {isAuthenticated && (
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white hover:bg-rose-50 border border-[#DDC7F8] hover:border-rose-200 text-xs font-bold text-rose-600 transition-colors cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Sair</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* Conteúdo Principal */}
-      <main className="max-w-6xl w-full mx-auto px-6 py-8 flex-1">
-        {feedbackToast && (
-          <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center gap-3 shadow-xs">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <span className="font-semibold text-sm">{feedbackToast}</span>
-          </div>
-        )}
-
-        {!isAuthenticated ? (
-          <div className="max-w-md mx-auto mt-12 bg-white rounded-3xl border border-[#DDC7F8] p-7 shadow-[0_14px_38px_rgba(51,0,67,0.08)]">
-            <div className="w-12 h-12 rounded-2xl bg-[#FAF5FF] border border-[#DDC7F8] flex items-center justify-center mb-4">
-              <KeyRound className="w-6 h-6 text-[#9747FF]" />
-            </div>
-
-            <h1 className="font-display text-2xl text-[#330043]">Acesso Restrito à Organização</h1>
-            <p className="text-sm text-[#545454] mt-1 mb-6">
-              Digite a senha configurada na variável <code className="font-mono text-[#9747FF]">ADMIN_PASSWORD</code> do arquivo <code className="font-mono">.env</code> para gerenciar ou limpar o Ranking Geral.
-            </p>
-
-            {authError && (
-              <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
-                {authError}
-              </div>
-            )}
-
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-[#330043] uppercase tracking-wider mb-1.5">
-                  Senha de Administração
-                </label>
-                <input
-                  type="password"
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="Digite a senha (ex: mdx2026)..."
-                  autoFocus
-                  className="mermas-input w-full px-4 py-3 text-sm font-semibold"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading || !passwordInput.trim()}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#FF4A97] text-white font-display text-base shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                {isLoading ? 'Verificando...' : 'Entrar no Painel Admin'}
-              </button>
+  const targetLabel = scope === '*' ? 'TODAS as salas' : `sala ${scope}`;
+  return <div className="min-h-screen bg-[#FAF7FF] text-[#330043] [&_:focus-visible]:outline-2 [&_:focus-visible]:outline-[#9747FF] [&_:focus-visible]:outline-offset-2">
+    <header className="bg-white border-b border-[#DDC7F8] p-4 flex flex-wrap items-center justify-between gap-4">
+      <img src="/mermas/logo.svg" alt="Mermãs Digitais" className="h-9" />
+      <nav className="flex flex-wrap gap-3 items-center"><Link to="/">Salas e telões</Link>{user && <button className={button} disabled={busy} onClick={() => void run(async () => { await logout(); setPassword(''); })}>Sair da conta</button>}</nav>
+    </header>
+    <main className="max-w-5xl mx-auto p-4 sm:p-8 space-y-6">
+      <h1 className="font-display text-2xl">{user ? `Conta de ${user.name}` : 'Acesso da organização'}</h1>
+      {error && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-800 border border-red-200">{error}</p>}
+      {notice && <p role="status" className="p-3 rounded-xl bg-emerald-50 text-emerald-900">{notice}</p>}
+      {!loaded ? <p role="status">Verificando sessão…</p> : !user ? <form className="mermas-card p-6 max-w-md space-y-4" onSubmit={(event) => { event.preventDefault(); void run(async () => { await login(email.trim(), password); setPassword(''); }); }}>
+        <p>Entre com a conta fornecida pela administração. Visitantes podem acompanhar os telões sem login.</p>
+        <label className="block">E-mail<input className={field} type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+        <label className="block">Senha<input className={field} type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <button disabled={busy} className={`${button} text-[#9747FF] font-semibold`}>{busy ? 'Entrando…' : 'Entrar'}</button>
+      </form> : <>
+        <section className="mermas-card p-6 space-y-4">
+          <h2 className="font-display text-xl">{user.mustChangePassword ? 'Troque a senha para continuar' : 'Alterar senha'}</h2>
+          <p>{user.mustChangePassword ? 'Primeiro acesso: crie uma senha pessoal antes de criar ou administrar salas.' : 'Ao alterar a senha, outras sessões desta conta serão encerradas.'}</p>
+          <form className="max-w-md space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+            if (newPassword !== confirmPassword) throw new Error('As novas senhas não coincidem.');
+            await changePassword(password, newPassword); setPassword(''); setNewPassword(''); setConfirmPassword(''); setNotice('Senha alterada. Sua conta está pronta.');
+          }); }}>
+            <label className="block">Senha atual<input type="password" required autoComplete="current-password" className={field} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <label className="block">Nova senha (mínimo 12 caracteres)<input type="password" required minLength={12} autoComplete="new-password" className={field} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+            <label className="block">Confirme a nova senha<input type="password" required minLength={12} autoComplete="new-password" className={field} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+            <button className={button} disabled={busy}>Salvar nova senha</button>
+          </form>
+        </section>
+        {!user.mustChangePassword && <>
+          {user.role === 'admin' && <section className="mermas-card p-6 space-y-4">
+            <h2 className="font-display text-xl">Operadores</h2>
+            <ul className="space-y-2">{users.map((operator) => <li key={operator.id} className="break-words">{operator.name} · {operator.email} · {operator.role === 'admin' ? 'Administrador' : 'Moderador'}</li>)}</ul>
+            <form className="max-w-md space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+              await api('/api/users', { name: createName.trim(), email: createEmail.trim(), password: temporaryPassword });
+              setTemporaryPassword(''); setCreateName(''); setCreateEmail('');
+              setUsers((await api<{ users: typeof users }>('/api/users')).users); setNotice('Moderador criado. A senha temporária deverá ser trocada no primeiro acesso.');
+            }); }}>
+              <h3 className="font-semibold">Criar moderador</h3>
+              <label className="block">Nome<input required maxLength={100} className={field} value={createName} onChange={(event) => setCreateName(event.target.value)} /></label>
+              <label className="block">E-mail<input type="email" required className={field} value={createEmail} onChange={(event) => setCreateEmail(event.target.value)} /></label>
+              <label className="block">Senha temporária (mínimo 8 caracteres)<input type="password" required minLength={8} autoComplete="new-password" className={field} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} /></label>
+              <button className={button} disabled={busy}>Criar conta de moderador</button>
             </form>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Resumo de Métricas do Banco PostgreSQL 18 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-3xl p-5 border border-[#DDC7F8] shadow-2xs flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-[#FAF5FF] border border-[#DDC7F8] flex items-center justify-center">
-                  <Users className="w-6 h-6 text-[#9747FF]" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-[#6E4F7D] uppercase">
-                    Jogadoras Cadastradas
-                  </div>
-                  <div className="font-display text-2xl text-[#330043]">{players.length}</div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-3xl p-5 border border-[#DDC7F8] shadow-2xs flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center">
-                  <Zap className="w-6 h-6 text-amber-500" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-[#6E4F7D] uppercase">
-                    Recorde Geral do Evento
-                  </div>
-                  <div className="font-display text-2xl text-[#330043]">
-                    {stats.highestScoreEver || 0} pts
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-3xl p-5 border border-[#DDC7F8] shadow-2xs flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-pink-50 border border-pink-200 flex items-center justify-center">
-                  <Gamepad2 className="w-6 h-6 text-[#FF4A97]" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-[#6E4F7D] uppercase">
-                    Partidas Registradas
-                  </div>
-                  <div className="font-display text-2xl text-[#330043]">
-                    {stats.totalMatches || 0}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Card Principal da Tabela de Ranking + Botão Protegido de Zerar Ranking */}
-            <div className="bg-white rounded-3xl border border-[#DDC7F8] shadow-[0_12px_36px_rgba(51,0,67,0.06)] p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#F3E8FF]">
-                <div>
-                  <h2 className="font-display text-xl text-[#330043]">
-                    Gerenciamento do Ranking Geral ({players.length} registros)
-                  </h2>
-                  <p className="text-xs text-[#6E4F7D]">
-                    Qualquer alteração feita aqui é salva no PostgreSQL 18 e atualiza o telão da TV em tempo real.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => fetchAdminData(savedPassword)}
-                    disabled={isLoading}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-[#FAF5FF] hover:bg-[#F3E8FF] border border-[#DDC7F8] text-xs font-bold text-[#330043] transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 text-[#9747FF] ${isLoading ? 'animate-spin' : ''}`} />
-                    <span>Atualizar Lista</span>
-                  </button>
-
-                  {!confirmClearAll ? (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClearAll(true)}
-                      disabled={players.length === 0 || isLoading}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Zerar Ranking Geral</span>
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 px-3 py-1.5 rounded-2xl">
-                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span className="text-xs font-bold text-rose-800">
-                        Confirmar limpeza total?
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleClearAllRankings}
-                        disabled={isLoading}
-                        className="px-3 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
-                      >
-                        Sim, Zerar Tudo
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmClearAll(false)}
-                        className="px-2.5 py-1 rounded-xl bg-white border border-rose-200 text-xs font-bold text-[#330043] cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Lista Completa de Participantes */}
-              {players.length === 0 ? (
-                <div className="py-14 text-center">
-                  <Trophy className="w-10 h-10 text-[#9747FF]/50 mx-auto mb-2" />
-                  <p className="font-display text-lg text-[#330043]">
-                    Nenhuma participante registrada no momento.
-                  </p>
-                </div>
-              ) : (
-                <div className="mt-4 space-y-2">
-                  {players.map((player, index) => {
-                    const pos = index + 1;
-                    const tier = getPlayerPowerTier({
-                      highScore: player.highScore,
-                      totalScore: player.totalScore,
-                      winsCount: player.winsCount,
-                      matchesPlayed: player.matchesPlayed,
-                    });
-                    const unlockedAchievements = getCareerAchievements({
-                      highScore: player.highScore,
-                      totalScore: player.totalScore,
-                      winsCount: player.winsCount,
-                      matchesPlayed: player.matchesPlayed,
-                    });
-
-                    return (
-                      <div
-                        key={player.id}
-                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-[#DDC7F8]/80 hover:bg-[#FAF7FF] transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="w-9 h-9 rounded-xl bg-[#FAF5FF] border border-[#DDC7F8] font-display text-xs flex items-center justify-center text-[#330043] shrink-0">
-                            {pos}º
-                          </span>
-
-                          <AvatarBadge
-                            avatar={player.avatar}
-                            size="sm"
-                            frameId={tier.frameId}
-                            powerLevel={tier.level}
-                          />
-
-                          <div className="flex flex-col items-start min-w-0">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${tier.pillClass}`}
-                            >
-                              <BadgeVectorIcon iconKey={tier.icon} className="w-2.5 h-2.5" />
-                              <span>{tier.shortTitle}</span>
-                            </span>
-                            <span className="font-display text-base text-[#330043] truncate mt-0.5">
-                              {player.nickname}
-                            </span>
-                            <div className="text-[11px] text-[#6E4F7D]">
-                              Total acumulado: {player.totalScore} pts • Device ID:{' '}
-                              <code className="font-mono">{player.deviceId.slice(0, 16)}</code>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex-1 min-w-0 px-2 overflow-hidden">
-                          <AchievementMarqueeStrip
-                            achievementIds={unlockedAchievements}
-                            size="md"
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-purple-50 border border-purple-200 text-[#4C1D95] font-display text-sm font-bold"
-                            title={`Poder Acumulado: ${tier.powerScore} PWR`}
-                          >
-                            <Zap className="w-3.5 h-3.5 text-[#9747FF] fill-[#9747FF]" />
-                            <span>{tier.powerScore} PWR</span>
-                          </span>
-
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-display text-sm">
-                            <Zap className="w-3.5 h-3.5 text-amber-500" />
-                            <span>{player.highScore} pts</span>
-                          </span>
-
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-pink-50 border border-pink-200 text-[#D01F6B] font-display text-sm">
-                            <Crown className="w-3.5 h-3.5 text-[#FF4A97]" />
-                            <span>{player.winsCount}</span>
-                          </span>
-
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#F5F0FF] border border-[#DDC7F8] text-[#4C1D95] font-display text-sm">
-                            <Gamepad2 className="w-3.5 h-3.5 text-[#9747FF]" />
-                            <span>{player.matchesPlayed}</span>
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeletePlayer(player)}
-                            disabled={isLoading}
-                            title={`Remover ${player.nickname} do banco`}
-                            className="w-9 h-9 rounded-xl bg-white hover:bg-rose-50 border border-[#DDC7F8] hover:border-rose-300 text-[#6E4F7D] hover:text-rose-600 flex items-center justify-center transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  );
+          </section>}
+          <section className="mermas-card p-6 space-y-4">
+            <h2 className="font-display text-xl">Manutenção do ranking</h2>
+            <label className="block">Sala alvo<select value={scope} className={field} onChange={(event) => { setScope(event.target.value); setConfirmation(null); setError(''); }}>
+              <option value="">Selecione uma sala</option>
+              {rooms.filter((room) => user.role === 'admin' || room.moderatorId === user.id).map((room) => <option key={room.roomCode} value={room.roomCode}>{room.roomName} ({room.roomCode})</option>)}
+              {user.role === 'admin' && <option value="*">Todas as salas — manutenção global</option>}
+            </select></label>
+            {scope && <>
+              <div className="flex flex-wrap gap-3"><button className={button} disabled={busy} onClick={() => void run(() => loadRanking(scope))}>Atualizar {targetLabel}</button>
+                <button className={`${button} text-red-800`} disabled={busy} onClick={() => setConfirmation({ title: `Zerar ranking — ${targetLabel}`, text: `Os placares de ${targetLabel} serão zerados, e as rodadas em andamento nesse escopo serão canceladas. A ação não pode ser desfeita.`, action: async () => { await api('/api/admin/clear-ranking', { ...(scope === '*' ? {} : { roomCode: scope }), confirm: true }); await loadRanking(scope); setNotice(`Ranking zerado: ${targetLabel}.`); } })}>Zerar ranking de {targetLabel}</button></div>
+              <ul className="divide-y divide-[#DDC7F8]">{players.map((player) => <li key={player.id} className="py-3 flex flex-wrap items-center justify-between gap-3"><span>{player.nickname} · Recorde {player.highScore} · {player.matchesPlayed} partidas</span>
+                <div className="flex flex-wrap gap-2">{user.role === 'admin' && <button className={button} disabled={busy} onClick={() => { setRecovery(player); setRecoveryCode(''); }}>Recuperar vínculo · {player.nickname}</button>}
+                <button className={`${button} text-red-800`} disabled={busy} onClick={() => setConfirmation({ title: `Remover ${player.nickname}`, text: `Remover o perfil e os dados de ${player.nickname} da sala ${player.roomCode}? A rodada em andamento nessa sala será cancelada. Esta ação é irreversível.`, action: async () => { await api(`/api/admin/players/${encodeURIComponent(player.id)}?room=${encodeURIComponent(player.roomCode)}&confirm=true`, undefined, 'DELETE'); await loadRanking(scope); setNotice(`${player.nickname} removida da sala ${player.roomCode}.`); } })}>Remover {player.nickname}</button></div>
+              </li>)}</ul>
+              {players.length === 0 && <p>Nenhuma participante neste ranking.</p>}
+            </>}
+          </section>
+        </>}
+      </>}
+    </main>
+    <AccessibleDialog open={Boolean(confirmation)} title={confirmation?.title || 'Confirmar ação'} onClose={() => setConfirmation(null)}>
+      <p className="mb-5">{confirmation?.text}</p><div className="flex gap-3"><button className={button} onClick={() => setConfirmation(null)}>Cancelar</button><button className={`${button} text-red-800`} disabled={busy} onClick={() => { const action = confirmation?.action; setConfirmation(null); if (action) void run(action); }}>Confirmar ação</button></div>
+    </AccessibleDialog>
+    <AccessibleDialog open={Boolean(recovery)} title={`Recuperar vínculo · ${recovery?.nickname || ''}`} onClose={() => setRecovery(null)}>
+      <p className="mb-4">Verifique pessoalmente a identidade de {recovery?.nickname} antes de continuar. O perfil da sala {recovery?.roomCode} será vinculado ao navegador indicado. Aguarde a sala ficar sem rodada em andamento. Não mescla perfis: se já existir outro perfil nesse navegador e sala, a operação será recusada.</p>
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); const player = recovery; if (!player) return; setRecovery(null); setConfirmation({ title: `Confirmar recuperação de ${player.nickname}`, text: `Confirma que verificou a identidade de ${player.nickname} e deseja vincular seu progresso da sala ${player.roomCode} ao código ${recoveryCode.trim()}? O navegador anterior perderá o vínculo.`, action: async () => { await api(`/api/admin/players/${encodeURIComponent(player.id)}/rebind`, { roomCode: player.roomCode, deviceId: recoveryCode.trim(), confirm: true }); setRecoveryCode(''); await loadRanking(scope); setNotice(`Vínculo de ${player.nickname} recuperado na sala ${player.roomCode}.`); } }); }}>
+        <label className="block">Código de recuperação do navegador da participante<input className={field} value={recoveryCode} required maxLength={128} onChange={(event) => setRecoveryCode(event.target.value)} autoComplete="off" /></label>
+        <button className={button} disabled={busy || !recoveryCode.trim()}>Revisar recuperação</button>
+      </form>
+    </AccessibleDialog>
+  </div>;
 };
