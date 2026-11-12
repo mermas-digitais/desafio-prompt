@@ -1,5 +1,6 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import { GameEngine } from './GameEngine.js';
+import { database } from '../db/index.js';
 import type { GameRoomState } from '../../shared/types.js';
 
 export interface RoomListItem {
@@ -22,15 +23,34 @@ export class RoomManager {
   }
 
   public async init(): Promise<void> {
-    // Inicializa a sala padrão da Arena MDX Principal aberta por padrão
-    const defaultEngine = new GameEngine(
-      this.io,
-      this.defaultRoomCode,
-      'Arena MDX Principal',
-      true
-    );
-    await defaultEngine.start();
-    this.rooms.set(this.defaultRoomCode, defaultEngine);
+    const storedRooms = await database.getRooms();
+    let hasDefault = false;
+
+    for (const stored of storedRooms) {
+      const code = stored.code.toUpperCase().trim();
+      if (code === this.defaultRoomCode) hasDefault = true;
+
+      const engine = new GameEngine(
+        this.io,
+        code,
+        stored.name || (code === this.defaultRoomCode ? 'Arena MDX Principal' : `Sala ${code}`),
+        stored.isOpen
+      );
+      await engine.start();
+      this.rooms.set(code, engine);
+    }
+
+    if (!hasDefault) {
+      const defaultEngine = new GameEngine(
+        this.io,
+        this.defaultRoomCode,
+        'Arena MDX Principal',
+        true
+      );
+      await defaultEngine.start();
+      this.rooms.set(this.defaultRoomCode, defaultEngine);
+      await database.upsertRoom(this.defaultRoomCode, 'Arena MDX Principal', true);
+    }
   }
 
   public getRoom(roomCode?: string): GameEngine | undefined {
@@ -61,22 +81,42 @@ export class RoomManager {
     return { engine, isNew: true };
   }
 
-  public openRoom(params: {
+  public async openRoom(params: {
     roomCode: string;
     name: string;
     password?: string;
-  }): { ok: boolean; state?: GameRoomState; error?: string } {
+  }): Promise<{ ok: boolean; state?: GameRoomState; error?: string }> {
     const code = (params.roomCode || this.defaultRoomCode).toUpperCase().trim();
     const { engine } = this.getOrCreateRoom(code, params.name, true);
     engine.openRoom({ name: params.name });
+    await database.upsertRoom(code, params.name, true);
     return { ok: true, state: engine.getState() };
   }
 
-  public closeRoom(roomCode: string): { ok: boolean } {
-    const engine = this.getRoom(roomCode);
+  public async closeRoom(roomCode: string): Promise<{ ok: boolean }> {
+    const code = (roomCode || this.defaultRoomCode).toUpperCase().trim();
+    const engine = this.getRoom(code);
     if (!engine) return { ok: false };
     engine.closeRoom();
+    await database.setRoomStatus(code, false);
     return { ok: true };
+  }
+
+  public async createRoom(params: {
+    roomCode: string;
+    name: string;
+    isOpen?: boolean;
+  }): Promise<{ ok: boolean; state: GameRoomState }> {
+    const code = (params.roomCode || '').toUpperCase().trim();
+    const name = (params.name || `Sala ${code}`).trim();
+    const isOpen = typeof params.isOpen === 'boolean' ? params.isOpen : true;
+
+    const { engine } = this.getOrCreateRoom(code, name, isOpen);
+    if (isOpen) {
+      engine.openRoom({ name });
+    }
+    await database.upsertRoom(code, name, isOpen);
+    return { ok: true, state: engine.getState() };
   }
 
   public listRooms(): RoomListItem[] {

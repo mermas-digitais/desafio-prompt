@@ -39,6 +39,7 @@ export const TVModerationModal: React.FC<TVModerationModalProps> = ({
 }) => {
   const roomState = useGameStore((s) => s.roomState);
   const openRoom = useGameStore((s) => s.openRoom);
+  const closeRoom = useGameStore((s) => s.closeRoom);
   const resetRoom = useGameStore((s) => s.resetRoom);
   const clearRanking = useGameStore((s) => s.clearRanking);
 
@@ -91,6 +92,48 @@ export const TVModerationModal: React.FC<TVModerationModalProps> = ({
         setFeedback({
           type: 'error',
           message: res.error || 'Senha incorreta ou erro ao abrir sala.',
+        });
+      }
+    } catch (err: unknown) {
+      setFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Erro ao conectar ao servidor.',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCloseSession = async () => {
+    if (!password.trim()) {
+      setFeedback({ type: 'error', message: 'Digite a senha de moderador.' });
+      return;
+    }
+    if (
+      !confirm(
+        'Tem certeza que deseja FECHAR esta sala? O QR Code será ocultado e novas entradas de celular serão bloqueadas.'
+      )
+    ) {
+      return;
+    }
+
+    setIsLoading(true);
+    setFeedback(null);
+    try {
+      const res = await closeRoom({
+        roomCode: (roomCodeInput.trim() || currentRoomCode || 'MDX26').toUpperCase(),
+        password: password.trim(),
+      });
+      if (res.ok) {
+        localStorage.setItem(SAVED_PW_KEY, password.trim());
+        setFeedback({
+          type: 'success',
+          message: 'Sala FECHADA com sucesso! O QR Code foi ocultado.',
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          message: res.error || 'Erro ao fechar sala. Verifique a senha.',
         });
       }
     } catch (err: unknown) {
@@ -272,15 +315,35 @@ export const TVModerationModal: React.FC<TVModerationModalProps> = ({
               </div>
             </div>
 
-            {/* BOTÃO PRINCIPAL: DECLARAR SALA ABERTA */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="mt-1 w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#D01F6B] hover:opacity-95 text-white font-display text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 transition-all"
-            >
-              <DoorOpen className="w-4 h-4" />
-              <span>{isLoading ? 'Declarando Sessão...' : 'Declarar Sala Aberta & Liberar QR Code'}</span>
-            </button>
+            {/* BOTÕES DE ABERTURA / FECHAMENTO DA SALA */}
+            <div className="flex flex-col gap-2 mt-1">
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#D01F6B] hover:opacity-95 text-white font-display text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 transition-all"
+              >
+                <DoorOpen className="w-4 h-4" />
+                <span>
+                  {isLoading
+                    ? 'Salvando...'
+                    : roomState.isOpen
+                    ? 'Atualizar Sessão & Manter Aberta'
+                    : '🟢 Declarar Sala Aberta & Liberar QR Code'}
+                </span>
+              </button>
+
+              {roomState.isOpen && (
+                <button
+                  type="button"
+                  onClick={handleCloseSession}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-4 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-display text-xs lg:text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-colors shadow-2xs"
+                >
+                  <DoorClosed className="w-4 h-4 text-amber-700" />
+                  <span>🔒 Fechar Sala (Ocultar QR Code e Pausar Entradas)</span>
+                </button>
+              )}
+            </div>
           </form>
 
           {/* CONTROLES RÁPIDOS DA SESSÃO */}

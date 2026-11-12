@@ -28,6 +28,14 @@ export interface StoredMatchRecord {
   createdAt: string;
 }
 
+export interface StoredRoomRecord {
+  code: string;
+  name: string;
+  isOpen: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface LocalPlayerRow {
   id: string;
   roomCode: string;
@@ -46,6 +54,7 @@ interface LocalPlayerRow {
 interface LocalDbData {
   players: LocalPlayerRow[];
   matches: StoredMatchRecord[];
+  rooms: StoredRoomRecord[];
 }
 
 const LOCAL_DB_FILE = path.resolve(process.cwd(), '.data', 'local-db.json');
@@ -56,7 +65,7 @@ class AppDatabase {
   private connected = false;
   private useLocalDb = false;
   private pgVersion = 'PostgreSQL 18';
-  private localData: LocalDbData = { players: [], matches: [] };
+  private localData: LocalDbData = { players: [], matches: [], rooms: [] };
 
   private ensureLocalStoreLoaded(): void {
     try {
@@ -80,12 +89,42 @@ class AppDatabase {
                 roomCode: m.roomCode || 'MDX26',
               }))
             : [],
+          rooms:
+            Array.isArray(parsed.rooms) && parsed.rooms.length > 0
+              ? parsed.rooms.map((r) => ({
+                  code: (r.code || 'MDX26').toUpperCase(),
+                  name: r.name || 'Arena MDX Principal',
+                  isOpen: typeof r.isOpen === 'boolean' ? r.isOpen : true,
+                  createdAt: r.createdAt || new Date().toISOString(),
+                  updatedAt: r.updatedAt || new Date().toISOString(),
+                }))
+              : [
+                  {
+                    code: 'MDX26',
+                    name: 'Arena MDX Principal',
+                    isOpen: true,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  },
+                ],
         };
       } else {
         this.saveLocalStore();
       }
     } catch {
-      this.localData = { players: [], matches: [] };
+      this.localData = {
+        players: [],
+        matches: [],
+        rooms: [
+          {
+            code: 'MDX26',
+            name: 'Arena MDX Principal',
+            isOpen: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      };
     }
   }
 
@@ -228,6 +267,18 @@ class AppDatabase {
           );
 
           UPDATE matches SET room_code = 'MDX26' WHERE room_code IS NULL OR room_code = '';
+
+          CREATE TABLE IF NOT EXISTS rooms (
+            code VARCHAR(32) PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            is_open BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+          );
+
+          INSERT INTO rooms (code, name, is_open)
+          VALUES ('MDX26', 'Arena MDX Principal', true)
+          ON CONFLICT (code) DO NOTHING;
         `);
       } finally {
         client.release();
@@ -828,6 +879,234 @@ class AppDatabase {
         totalMatches: impliedMatches,
         highestScoreEver,
       },
+    };
+  }
+
+  public async getRooms(): Promise<StoredRoomRecord[]> {
+    if (this.useLocalDb) {
+      if (!this.localData.rooms || this.localData.rooms.length === 0) {
+        this.localData.rooms = [
+          {
+            code: 'MDX26',
+            name: 'Arena MDX Principal',
+            isOpen: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ];
+        this.saveLocalStore();
+      }
+      return this.localData.rooms;
+    }
+
+    const db = this.ensureDb();
+    const rows = await db.select().from(schema.rooms).orderBy(desc(schema.rooms.updatedAt));
+    if (rows.length === 0) {
+      await db
+        .insert(schema.rooms)
+        .values({
+          code: 'MDX26',
+          name: 'Arena MDX Principal',
+          isOpen: true,
+        })
+        .onConflictDoNothing();
+      return [
+        {
+          code: 'MDX26',
+          name: 'Arena MDX Principal',
+          isOpen: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+    }
+    return rows.map((r) => ({
+      code: r.code,
+      name: r.name,
+      isOpen: r.isOpen,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    }));
+  }
+
+  public async upsertRoom(
+    code: string,
+    name: string,
+    isOpen = true
+  ): Promise<StoredRoomRecord> {
+    const cleanCode = (code || 'MDX26').toUpperCase().trim();
+    const cleanName = (name || `Sala ${cleanCode}`).trim();
+    const nowIso = new Date().toISOString();
+
+    if (this.useLocalDb) {
+      const idx = this.localData.rooms.findIndex((r) => r.code === cleanCode);
+      if (idx !== -1) {
+        this.localData.rooms[idx].name = cleanName;
+        this.localData.rooms[idx].isOpen = isOpen;
+        this.localData.rooms[idx].updatedAt = nowIso;
+      } else {
+        this.localData.rooms.push({
+          code: cleanCode,
+          name: cleanName,
+          isOpen,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+      this.saveLocalStore();
+      return this.localData.rooms.find((r) => r.code === cleanCode)!;
+    }
+
+    const db = this.ensureDb();
+    await db
+      .insert(schema.rooms)
+      .values({
+        code: cleanCode,
+        name: cleanName,
+        isOpen,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.rooms.code,
+        set: {
+          name: cleanName,
+          isOpen,
+          updatedAt: new Date(),
+        },
+      });
+
+    return {
+      code: cleanCode,
+      name: cleanName,
+      isOpen,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+  }
+
+  public async setRoomStatus(code: string, isOpen: boolean): Promise<boolean> {
+    const cleanCode = (code || 'MDX26').toUpperCase().trim();
+    const nowIso = new Date().toISOString();
+
+    if (this.useLocalDb) {
+      const idx = this.localData.rooms.findIndex((r) => r.code === cleanCode);
+      if (idx !== -1) {
+        this.localData.rooms[idx].isOpen = isOpen;
+        this.localData.rooms[idx].updatedAt = nowIso;
+        this.saveLocalStore();
+        return true;
+      }
+      return false;
+    }
+
+    const db = this.ensureDb();
+    await db
+      .update(schema.rooms)
+      .set({
+        isOpen,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.rooms.code, cleanCode));
+    return true;
+  }
+
+  public async getGlobalStats(): Promise<{
+    totalPlayers: number;
+    totalMatches: number;
+    highestScoreEver: number;
+    totalRooms: number;
+    topPWR: Array<{
+      nickname: string;
+      avatar: string;
+      powerScore: number;
+      tier: string;
+      highScore: number;
+      roomCode: string;
+    }>;
+  }> {
+    let allPlayers: PlayerProfile[] = [];
+    let totalMatches = 0;
+    let totalRooms = 1;
+
+    if (this.useLocalDb) {
+      allPlayers = this.localData.players
+        .filter((p) => !p.isBot && !p.deviceId.startsWith('seed-') && !p.deviceId.startsWith('bot-'))
+        .map((p) => ({
+          ...p,
+          powerScore: calculatePlayerPowerScore(p),
+          powerTier: getPlayerPowerTier(p),
+        }));
+      totalMatches = this.localData.matches.length;
+      totalRooms = this.localData.rooms.length;
+    } else {
+      const db = this.ensureDb();
+      const pRows = await db
+        .select()
+        .from(schema.players)
+        .where(
+          and(
+            eq(schema.players.isBot, false),
+            sql`device_id NOT LIKE 'seed-%'`,
+            sql`device_id NOT LIKE 'bot-%'`
+          )
+        );
+
+      allPlayers = pRows.map((p) => {
+        const raw: PlayerProfile = {
+          id: p.id,
+          deviceId: p.deviceId,
+          nickname: p.nickname,
+          avatar: p.avatar as AvatarId,
+          highScore: p.highScore,
+          totalScore: p.totalScore,
+          matchesPlayed: p.matchesPlayed,
+          winsCount: p.winsCount,
+          isBot: p.isBot,
+          roomCode: p.roomCode,
+        };
+        const powerScore = calculatePlayerPowerScore(raw);
+        return {
+          ...raw,
+          powerScore,
+          powerTier: getPlayerPowerTier(raw),
+        };
+      });
+
+      const mCount = await db.select({ count: sql<number>`count(*)` }).from(schema.matches);
+      totalMatches = Number(mCount[0]?.count || 0);
+
+      const rCount = await db.select({ count: sql<number>`count(*)` }).from(schema.rooms);
+      totalRooms = Number(rCount[0]?.count || 1);
+    }
+
+    const highestScoreEver = allPlayers.reduce(
+      (max, p) => (p.highScore > max ? p.highScore : max),
+      0
+    );
+
+    const sortedByPWR = [...allPlayers].sort((a, b) => {
+      const pwrA = calculatePlayerPowerScore(a);
+      const pwrB = calculatePlayerPowerScore(b);
+      if (pwrB !== pwrA) return pwrB - pwrA;
+      return b.highScore - a.highScore;
+    });
+
+    const topPWR = sortedByPWR.slice(0, 3).map((p) => ({
+      nickname: p.nickname,
+      avatar: p.avatar,
+      powerScore: calculatePlayerPowerScore(p),
+      tier: getPlayerPowerTier(p).title,
+      highScore: p.highScore,
+      roomCode: p.roomCode || 'MDX26',
+    }));
+
+    return {
+      totalPlayers: allPlayers.length,
+      totalMatches,
+      highestScoreEver,
+      totalRooms,
+      topPWR,
     };
   }
 }

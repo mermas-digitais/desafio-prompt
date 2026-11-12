@@ -47,9 +47,19 @@ export const matches = pgTable('matches', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const rooms = pgTable('rooms', {
+  code: varchar('code', { length: 32 }).primaryKey(),
+  name: varchar('name', { length: 120 }).notNull(),
+  isOpen: boolean('is_open').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export type PlayerRow = typeof players.$inferSelect;
 export type NewPlayerRow = typeof players.$inferInsert;
 export type ChallengeRow = typeof challenges.$inferSelect;
 export type NewChallengeRow = typeof challenges.$inferInsert;
 export type MatchRow = typeof matches.$inferSelect;
 export type NewMatchRow = typeof matches.$inferInsert;
+export type RoomRow = typeof rooms.$inferSelect;
+export type NewRoomRow = typeof rooms.$inferInsert;

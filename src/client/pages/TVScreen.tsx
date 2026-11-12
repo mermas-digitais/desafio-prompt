@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, RotateCcw, Shield, Zap } from 'lucide-react';
+import { Lightbulb, RotateCcw, Zap } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
 import { useNetworkConfig } from '../hooks/useNetworkConfig';
@@ -61,29 +61,13 @@ export const TVScreen: React.FC = () => {
         intensity={phase === 'PLAYING' || phase === 'REVEALING' ? 'excited' : 'calm'}
       />
 
-      {/* Cabeçalho Oficial Limpo (Com badge de Moderação e slot reservado para Player de música) */}
+      {/* Cabeçalho Oficial Limpo (Moderação concentrada exclusivamente no Card lateral de QR Code) */}
       <BandeirolasHeader
         mode="tv"
         isMuted={isMuted}
         onToggleMute={toggleMute}
         rightSlot={
           <div className="flex items-center gap-2">
-            {/* Botão de Moderação da Sessão */}
-            <button
-              type="button"
-              onClick={() => setIsModerationOpen(true)}
-              title="Abrir Painel de Moderação da Sala"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-[#FAF5FF] border border-[#DDC7F8] text-xs font-semibold text-[#330043] cursor-pointer transition-colors shadow-2xs whitespace-nowrap"
-            >
-              <Shield className="w-3.5 h-3.5 text-[#9747FF]" />
-              <span className="hidden md:inline">{roomState.roomName || roomState.roomCode}</span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  roomState.isOpen ? 'bg-emerald-500' : 'bg-amber-400'
-                }`}
-              />
-            </button>
-
             {isInGameHeaderMode && (
               <>
                 <div

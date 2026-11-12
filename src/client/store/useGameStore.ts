@@ -107,6 +107,10 @@ interface GameStoreState {
     name: string;
     password?: string;
   }) => Promise<{ ok: boolean; error?: string; state?: GameRoomState }>;
+  closeRoom: (params: {
+    roomCode?: string;
+    password?: string;
+  }) => Promise<{ ok: boolean; error?: string; state?: GameRoomState }>;
   kickPlayer: (params: {
     roomCode?: string;
     playerId: string;
@@ -234,6 +238,27 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         }
         resolve(res);
       });
+    });
+  },
+
+  closeRoom: (params) => {
+    get().initSocketConnection();
+    const socket = getSocket();
+    const targetRoom = params.roomCode || get().roomState.roomCode || 'MDX26';
+    set({ isSyncing: true });
+    return new Promise((resolve) => {
+      socket.emit(
+        'moderator:close-room',
+        { ...params, roomCode: targetRoom },
+        (res: { ok: boolean; error?: string; state?: GameRoomState }) => {
+          if (res?.state && res.state.phase) {
+            set({ roomState: res.state, isSyncing: false });
+          } else {
+            set({ isSyncing: false });
+          }
+          resolve(res);
+        }
+      );
     });
   },
 

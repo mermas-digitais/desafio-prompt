@@ -410,6 +410,11 @@ async function bootstrap() {
     return { ok: true, rooms: roomManager.listRooms() };
   });
 
+  fastify.get('/api/metrics/global', async () => {
+    const stats = await database.getGlobalStats();
+    return { ok: true, stats };
+  });
+
   fastify.post<{
     Body: { roomCode?: string; name: string; password?: string };
   }>('/api/rooms/open', async (req, reply) => {
@@ -417,7 +422,8 @@ async function bootstrap() {
     if (!verifyAdminPassword(password)) {
       return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
     }
-    const outcome = roomManager.openRoom({ roomCode, name, password });
+    const outcome = await roomManager.openRoom({ roomCode, name, password });
+    io.emit('rooms:updated', roomManager.listRooms());
     return { ok: true, state: outcome.state };
   });
 
@@ -428,8 +434,25 @@ async function bootstrap() {
     if (!verifyAdminPassword(password)) {
       return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
     }
-    roomManager.closeRoom(roomCode);
+    await roomManager.closeRoom(roomCode);
+    io.emit('rooms:updated', roomManager.listRooms());
     return { ok: true };
+  });
+
+  fastify.post<{
+    Body: { roomCode: string; name: string; password?: string };
+  }>('/api/rooms/create', async (req, reply) => {
+    const { roomCode, name, password } = req.body || {};
+    if (!verifyAdminPassword(password)) {
+      return reply.code(401).send({ ok: false, error: 'Senha de moderador incorreta.' });
+    }
+    if (!roomCode || !name) {
+      return reply.code(400).send({ ok: false, error: 'Código e nome da sala são obrigatórios.' });
+    }
+    const cleanCode = roomCode.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 12);
+    const outcome = await roomManager.createRoom({ roomCode: cleanCode, name, isOpen: true });
+    io.emit('rooms:updated', roomManager.listRooms());
+    return { ok: true, state: outcome.state };
   });
 
   fastify.get<{
@@ -751,7 +774,7 @@ async function bootstrap() {
     // 9. Moderação: Abrir sala na TV com senha
     socket.on(
       'moderator:open-room',
-      (
+      async (
         payload: { roomCode: string; name: string; password?: string },
         cb?: (res: { ok: boolean; error?: string; state?: unknown }) => void
       ) => {
@@ -760,14 +783,35 @@ async function bootstrap() {
           if (typeof cb === 'function') cb(res);
           return;
         }
-        const outcome = roomManager.openRoom({
+        const outcome = await roomManager.openRoom({
           roomCode: payload.roomCode,
           name: payload.name,
           password: payload.password,
         });
         currentSocketRoomCode = payload.roomCode.toUpperCase().trim();
         socket.join(currentSocketRoomCode);
+        io.emit('rooms:updated', roomManager.listRooms());
         if (typeof cb === 'function') cb({ ok: true, state: outcome.state });
+      }
+    );
+
+    // 9.1 Moderação: Fechar sala na TV com senha
+    socket.on(
+      'moderator:close-room',
+      async (
+        payload: { roomCode: string; password?: string },
+        cb?: (res: { ok: boolean; error?: string; state?: unknown }) => void
+      ) => {
+        if (!verifyAdminPassword(payload?.password)) {
+          const res = { ok: false, error: 'Senha de moderador incorreta.' };
+          if (typeof cb === 'function') cb(res);
+          return;
+        }
+        const target = (payload.roomCode || currentSocketRoomCode).toUpperCase().trim();
+        await roomManager.closeRoom(target);
+        const engine = getEngine(target);
+        io.emit('rooms:updated', roomManager.listRooms());
+        if (typeof cb === 'function') cb({ ok: true, state: engine.getState() });
       }
     );
 

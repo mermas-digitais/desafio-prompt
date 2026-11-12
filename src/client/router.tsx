@@ -1,29 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   createRootRoute,
   createRoute,
   createRouter,
   Outlet,
 } from '@tanstack/react-router';
+import { HomeScreen } from './pages/HomeScreen';
 import { TVScreen } from './pages/TVScreen';
 import { PlayScreen } from './pages/PlayScreen';
 import { AdminScreen } from './pages/AdminScreen';
 import { TopLoadingBar } from './components/TopLoadingBar';
-import { detectMobileViewport } from './helpers/networkHelpers';
-
-const SmartDeviceEntry: React.FC = () => {
-  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(() => detectMobileViewport());
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobileDevice(detectMobileViewport());
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  return isMobileDevice ? <PlayScreen /> : <TVScreen />;
-};
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -37,12 +23,15 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: SmartDeviceEntry,
+  component: HomeScreen,
 });
 
 const tvRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tv',
+  validateSearch: (search: Record<string, unknown>): { room?: string } => ({
+    room: typeof search.room === 'string' ? search.room : 'MDX26',
+  }),
   component: TVScreen,
 });
 
@@ -70,7 +59,7 @@ const admAliasRoute = createRoute({
 const fallbackRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '$',
-  component: SmartDeviceEntry,
+  component: HomeScreen,
 });
 
 const routeTree = rootRoute.addChildren([

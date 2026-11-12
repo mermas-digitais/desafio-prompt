@@ -36,6 +36,7 @@ export interface PlayerProfile {
   matchesPlayed: number;   // Total de partidas jogadas
   winsCount: number;       // Total de vitórias (1º lugar)
   isBot?: boolean;
+  roomCode?: string;
 }
 
 export interface RoomPlayer {
