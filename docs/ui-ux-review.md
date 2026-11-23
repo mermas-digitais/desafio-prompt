@@ -49,3 +49,9 @@ No painel, selecione uma sala em Ranking e use **Excluir sala e dados…**. Mode
 O script de navegador agora exclui MDX26 e PALCO2 como moderadora, verifica confirmação vazia/incorreta, retorno de telão e celular ao início, painel e home sem salas e criação de uma nova MDX26. O cenário usa somente a fixture temporária. Reinicie a fixture antes de repetir: o teste é destrutivo apenas para seus dados fictícios.
 
 Validação: testes automatizados de persistência/rollback, autorização, exclusão da última sala/reinício, bloqueios de avaliação/gravação/edição, retomada após falha, descarte de timer/broadcasts e limpeza isolada de histórico local. SQL usa cliente simulado; concorrência com PostgreSQL real não foi exercitada. TypeScript e build passaram; Vite mantém aviso de bundle maior que 500 kB.
+
+## Cancelamento no lobby e dicas reduzidas
+
+O lobby substitui o cartão principal de QR por cartões de posições; por isso o cancelamento fica junto de **Iniciar agora com Bot Mermã**, não escondido no modal de moderação ou no cabeçalho. Reutiliza o diálogo de confirmação do lobby e avisa que todos saem da rodada, o QR expira e o progresso permanece.
+
+`tests/lobby-cancellation.browser.mjs` valida uma conta moderadora e uma participante em sessões separadas: entrada, confirmação em 1366×768/390×667, aviso de cancelamento no celular, sala vazia e QR antigo expirado. Execute na fixture recém-iniciada e sem sessão no navegador, como os outros testes locais. O teste cria LOBBYQA; reinicie a fixture antes de repetir. O motor também testa todas as fases recusadas e o orçamento de palavras em todos os desafios oficiais: uma aos 60s, três aos 30s, nenhuma revelação completa antes do resultado.

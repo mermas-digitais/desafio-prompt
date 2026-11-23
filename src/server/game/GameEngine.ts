@@ -184,6 +184,20 @@ export class GameEngine {
     this.broadcastState();
   }
 
+  public cancelLobby(roundToken: string): { ok: boolean; error?: string; state?: GameRoomState } {
+    if (this.disposed || this.paused || this.phase !== 'LOBBY' || roundToken !== this.roundToken) {
+      return { ok: false, error: 'Este lobby já mudou ou a partida começou. Atualize a sala antes de cancelar.' };
+    }
+    for (const player of this.players) {
+      if (player.socketId && !player.isBot) this.io.to(player.socketId).emit('player:kicked', {
+        roomCode: this.roomCode, roomName: this.roomName,
+        reason: 'Partida cancelada pela organização. Escaneie o novo QR do telão para jogar novamente.',
+      });
+    }
+    this.resetToIdle();
+    return { ok: true, state: this.getState() };
+  }
+
   public kickPlayer(
     playerIdOrSlot: string | number,
     reason = 'Removido pelo moderador da sala'
@@ -294,28 +308,10 @@ export class GameEngine {
 
     const pushLayerWords = (text: string, layer: 'subject' | 'style' | 'environment') => {
       const words = text.split(/\s+/).filter(Boolean);
+      const hintIndex = words.findIndex((word) => word.replace(/[^a-zA-ZÀ-ÿ0-9]/g, '').length > 3);
       words.forEach((word, index) => {
-        let isRevealed = forceRevealAll;
-
-        if (!isRevealed) {
-          const cleanWord = word.replace(/[^a-zA-ZÀ-ÿ0-9]/g, '').toLowerCase();
-          // Palavras curtas de ligação (de, em, um, uma, com, por, nas, ao) ajudam na estrutura
-          const isConnector = cleanWord.length <= 3;
-
-          if (roundTimeLeft <= 60 && layer === 'style') {
-            // Aos 60s revela ~25% das palavras da camada de estilo
-            if (index % 4 === 0 || isConnector) {
-              isRevealed = true;
-            }
-          }
-
-          if (roundTimeLeft <= 30) {
-            // Aos 30s revela ~50% das palavras-chave para dar emoção final
-            if (index % 2 === 0 || isConnector) {
-              isRevealed = true;
-            }
-          }
-        }
+        // One stable word per layer: style at 60s, subject/environment at 30s.
+        const isRevealed = forceRevealAll || (index === hintIndex && roundTimeLeft <= (layer === 'style' ? 60 : 30));
 
         tokens.push({
           text: isRevealed ? word : '',

@@ -19,6 +19,7 @@ mock.module('../src/server/db/index.ts', { namedExports: { database: db } });
 mock.module('../src/server/ai/promptEvaluator.ts', { namedExports: { evaluateRoundPrompts: (...args: any[]) => evaluate(...args) } });
 const { GameEngine } = await import('../src/server/game/GameEngine.js');
 const { RoomManager } = await import('../src/server/game/RoomManager.js');
+const { OFFICIAL_CHALLENGES } = await import('../src/server/db/challengesData.js');
 const profile = (id = 'one'): PlayerProfile => ({ id, deviceId: `private-${id}`, nickname: id, avatar: 'ia', highScore: 0, totalScore: 0, matchesPlayed: 0, winsCount: 0 });
 function fixture(code = 'MDX26') {
   const events: any[] = [];
@@ -74,6 +75,71 @@ test('kicking last human does not rotate token or allow reentry until explicit n
   assert.equal(engine.joinRoom(profile(), 'socket', engine.getState().roundToken).joined, false);
   engine.resetToIdle();
   assert.equal(engine.joinRoom(profile(), 'socket', engine.getState().roundToken).joined, true);
+});
+
+test('lobby cancellation removes every participant, invalidates QR and preserves other rooms and scores', () => {
+  const { engine, events } = fixture('A');
+  const other = fixture('B').engine;
+  const player = { ...profile('one'), totalScore: 900 };
+  engine.joinRoom(player, 'socket1', engine.getState().roundToken);
+  engine.joinRoom(profile('two'), 'socket2', engine.getState().roundToken);
+  other.joinRoom(profile('other'), 'socket3', other.getState().roundToken);
+  const token = engine.getState().roundToken;
+  const commits = db.commitRound.mock.callCount();
+  assert.equal(engine.cancelLobby('stale').ok, false);
+  assert.equal(engine.getState().players.length, 2);
+  assert.equal(engine.cancelLobby(token).ok, true);
+  assert.equal(engine.getState().phase, 'IDLE');
+  assert.deepEqual(engine.getState().players, []);
+  assert.deepEqual(engine.getState().evaluations, []);
+  assert.notEqual(engine.getState().roundToken, token);
+  assert.equal(engine.joinRoom(player, 'socket1', token).joined, false);
+  assert.equal(engine.validateRoundToken(token).roundData, undefined);
+  const kicked = events.filter((event) => event.event === 'player:kicked');
+  assert.deepEqual(kicked.map((event) => event.target), ['socket1', 'socket2']);
+  assert.ok(kicked.every((event) => event.data.roomCode === 'A' && event.data.reason.includes('cancelada')));
+  assert.equal(other.getState().players.length, 1);
+  assert.equal(player.totalScore, 900);
+  assert.equal(db.commitRound.mock.callCount(), commits);
+  assert.equal(engine.joinRoom(player, 'socket1', engine.getState().roundToken).joined, true);
+});
+
+test('lobby cancellation refuses idle, countdown and every in-game phase without changing the round', () => {
+  for (const phase of ['IDLE', 'COUNTDOWN', 'PLAYING', 'EVALUATING', 'REVEALING', 'PODIUM']) {
+    const { engine, events } = fixture();
+    (engine as any).phase = phase;
+    const token = engine.getState().roundToken;
+    assert.equal(engine.cancelLobby(token).ok, false);
+    assert.equal(engine.getState().roundToken, token);
+    assert.equal(engine.getState().phase, phase);
+    assert.deepEqual(events, []);
+  }
+});
+
+test('prompt hints reveal at most one word at 60s and three at 30s, full prompt only after evaluation', () => {
+  const { engine } = fixture();
+  for (const challenge of OFFICIAL_CHALLENGES) {
+    (engine as any).currentChallenge = challenge;
+    (engine as any).phase = 'PLAYING';
+    let previous: number[] = [];
+    for (const [time, limit] of [[90, 0], [61, 0], [60, 1], [31, 1], [30, 3], [1, 3], [0, 3]]) {
+      (engine as any).roundTimeLeft = time;
+      const view = engine.getState().challenge!;
+      const revealed = view.maskedPromptTokens.flatMap((token, index) => token.isRevealed ? [index] : []);
+      assert.equal(revealed.length, limit, `${challenge.id} has the wrong hint budget at ${time}s`);
+      assert.ok(previous.every((index) => revealed.includes(index)), 'hints must not move or disappear');
+      assert.ok(view.maskedPromptTokens.every((token) => token.isRevealed || token.text === ''));
+      assert.equal(view.fullPrompt, undefined);
+      previous = revealed;
+    }
+    (engine as any).phase = 'EVALUATING';
+    assert.ok(engine.getState().challenge!.maskedPromptTokens.filter((token) => token.isRevealed).length <= 3);
+    for (const phase of ['REVEALING', 'PODIUM']) {
+      (engine as any).phase = phase;
+      assert.ok(engine.getState().challenge!.maskedPromptTokens.every((token) => token.isRevealed));
+      assert.equal(engine.getState().challenge!.fullPrompt, challenge.fullPrompt);
+    }
+  }
 });
 
 test('reset invalidates delayed AI evaluation before any persistence', async () => {

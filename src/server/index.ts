@@ -318,6 +318,12 @@ export async function createApplication() {
       roomsUpdated();
       return { ok: true, state: getEngine(code).getState() };
     });
+    on('room:cancel-lobby', roomInput.extend({ roundToken: z.string().min(1).max(180) }), async (input) => {
+      await authorizeRoom(socket.request.headers, input.roomCode);
+      const result = getEngine(input.roomCode).cancelLobby(input.roundToken);
+      if (result.ok) roomsUpdated();
+      return result;
+    });
     on('moderator:open-room', roomInput.extend({ name: z.string().trim().min(2).max(120).optional() }), async (input) => {
       await authorizeRoom(socket.request.headers, input.roomCode);
       const result = await roomManager.openRoom({ roomCode: input.roomCode, name: input.name || getEngine(input.roomCode).getState().roomName });

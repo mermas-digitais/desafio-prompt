@@ -3,7 +3,7 @@ import { useRoomAccess } from '../../hooks/useRoomAccess';
 import { AccessibleDialog } from '../AccessibleDialog';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
-import { CheckCircle2, Clock, ExternalLink, Users, UserX, Zap } from 'lucide-react';
+import { CheckCircle2, Clock, ExternalLink, Users, UserX, XCircle, Zap } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { formatTimer } from '../../helpers/formatters';
 import { AvatarBadge } from '../AvatarBadge';
@@ -24,6 +24,8 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
   const players = useGameStore((s) => s.roomState.players);
   const lobbyTimeLeft = useGameStore((s) => s.roomState.lobbyTimeLeft);
   const roomCode = useGameStore((s) => s.roomState.roomCode);
+  const roundToken = useGameStore((s) => s.roomState.roundToken);
+  const cancelLobby = useGameStore((s) => s.cancelLobby);
   const startWithBotsNow = useGameStore((s) => s.startWithBotsNow);
   const kickPlayer = useGameStore((s) => s.kickPlayer);
   const isOpen = useGameStore((s) => s.roomState.isOpen);
@@ -67,7 +69,7 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           {/* Relógio Único em Lugar de Destaque */}
           <div className="px-5 py-2.5 rounded-2xl bg-gradient-to-br from-[#FAF5FF] to-[#FEF0ED] border-2 border-[#9747FF]/45 shadow-[0_8px_24px_rgba(151,71,255,0.14)] flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white border border-[#DDC7F8] flex items-center justify-center shrink-0 shadow-2xs">
@@ -90,6 +92,9 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
           >
             <Zap className="w-4 h-4" />
             <span>Iniciar agora com Bot Mermã</span>
+          </button>}
+          {canManage && <button type="button" className="org-button org-button-danger" disabled={busy} onClick={() => setConfirmation({ label: 'Cancelar partida', destructive: true, text: `Cancelar a partida no lobby de ${roomCode}? Todas as participantes serão removidas e o QR atual deixará de funcionar. Perfis, pontos e histórico serão preservados. Para jogar novamente, será necessário escanear o novo QR do telão.`, action: () => cancelLobby(roomCode, roundToken) })}>
+            <XCircle size={18} aria-hidden="true" />Cancelar partida…
           </button>}
         </div>
       </div>

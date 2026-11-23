@@ -36,6 +36,12 @@ Unicidade de jogador em `(room_code,device_id)`. IDs e totais legados permanecem
 ## Estados e integridade
 Fechar entradas altera somente isOpen. Participantes já vinculados podem terminar/reconectar; nenhuma nova entrada aceita. Reabrir não troca token em rodada vigente. Cancelar/reset é ação distinta autorizada. Cada avaliação valida roundId/geração após awaits; reset e limpeza invalidam trabalho pendente. Kick bloqueia perfil pela rodada. Token obrigatório para nova entrada/envio. Consultar sala inexistente não cria motor. Estados socket sempre segmentados e filtrados por sala no cliente.
 
+### Cancelar uma partida no lobby
+O controle **Cancelar partida…** fica ao lado de iniciar com bots, somente para a organização. Exige confirmação e envia `room:cancel-lobby` com `roomCode` e o `roundToken` observado. O servidor exige operador autenticado com troca inicial concluída e recusa token desatualizado ou fase diferente de `LOBBY`. A ação notifica as participantes, esvazia a rodada e volta para `IDLE` com novo QR. Não grava partida/pontos, não apaga perfis/histórico, não altera entradas abertas/fechadas nem outras salas. O QR antigo não permite reentrada; o novo QR permite uma nova tentativa. O reset geral de manutenção continua separado.
+
+### Revelação de palavras durante o jogo
+Antes de 60 segundos restantes, nenhuma palavra do prompt é revelada. Aos 60s, no máximo uma palavra da camada de estilo; aos 30s, mais uma de assunto e uma de ambiente, totalizando no máximo três. Não há revelação extra de conectores curtos. A escolha permanece estável durante a rodada; palavras ocultas não são enviadas no estado público. `REVEALING`/`PODIUM` continuam mostrando o prompt completo. Imagens, desfoque, dicas textuais e duração da rodada não foram alterados.
+
 ## Migração de identidade anônima
 IDs antigos eram públicos, portanto não são prova de posse. Novas sessões privadas não podem reivindicar outro perfil apenas informando deviceId. Preservar dados legados; qualquer recuperação de vínculo legado precisa de verificação administrativa, nunca apropriação automática por ID público.
 

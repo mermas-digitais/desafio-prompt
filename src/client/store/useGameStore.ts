@@ -70,6 +70,7 @@ interface GameStoreState {
   submitPrompt: (deviceId: string, prompt: string, roomCode?: string, roundToken?: string) => Promise<CommandResponse>;
   startWithBotsNow: (roomCode?: string) => Promise<CommandResponse>;
   resetRoom: (roomCode?: string) => Promise<CommandResponse>;
+  cancelLobby: (roomCode: string, roundToken: string) => Promise<CommandResponse>;
   clearRanking: (roomCode?: string) => Promise<CommandResponse>;
 }
 
@@ -156,5 +157,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   submitPrompt: (_deviceId, prompt, roomCode, roundToken) => command('player:submit-prompt', { prompt, roomCode: roomCode || get().requestedRoomCode, roundToken }),
   startWithBotsNow: (roomCode) => command('room:start-with-bots', { roomCode: roomCode || get().requestedRoomCode }),
   resetRoom: (roomCode) => command('room:reset', { roomCode: roomCode || get().requestedRoomCode }),
+  cancelLobby: (roomCode, roundToken) => command('room:cancel-lobby', { roomCode, roundToken }),
   clearRanking: (roomCode) => command('room:clear-ranking', { roomCode: roomCode || get().requestedRoomCode, confirm: true }),
 }));

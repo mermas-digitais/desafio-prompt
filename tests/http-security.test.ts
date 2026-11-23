@@ -101,6 +101,20 @@ test('all staff control all rooms while account management and global maintenanc
     assert.equal((await ack(stranger, 'player:leave-room', { roomCode: 'AUDITA', deviceId: participant.body.deviceId })).ok, false);
     assert.equal((await request('/api/state?room=AUDITA')).body.players.length, 1);
 
+    const lobbyToken = (await request('/api/state?room=AUDITA')).body.roundToken;
+    assert.equal((await ack(stranger, 'room:cancel-lobby', { roomCode: 'AUDITA', roundToken: lobbyToken })).ok, false);
+    assert.equal((await ack(staffSocket, 'room:cancel-lobby', { roomCode: 'AUDITA' })).ok, false);
+    assert.equal((await ack(staffSocket, 'room:cancel-lobby', { roomCode: 'AUDITA', roundToken: 'old-token' })).ok, false);
+    const kicked = once(player, 'player:kicked');
+    const cancelled = await ack(staffSocket, 'room:cancel-lobby', { roomCode: 'AUDITA', roundToken: lobbyToken });
+    assert.equal(cancelled.ok, true);
+    assert.equal((await kicked)[0].roomCode, 'AUDITA');
+    assert.equal(cancelled.state.phase, 'IDLE');
+    assert.deepEqual(cancelled.state.players, []);
+    assert.equal((await ack(player, 'player:join-room', { roomCode: 'AUDITA', roundToken: lobbyToken })).ok, false);
+    assert.equal((await ack(player, 'player:identify', { roomCode: 'AUDITA' })).profile.id, registered.profile.id);
+    assert.equal((await ack(player, 'player:join-room', { roomCode: 'AUDITA', roundToken: cancelled.state.roundToken })).ok, true);
+
     const another = await ack(player, 'player:register', { roomCode: 'AUDITB', nickname: 'OutroPerfil', avatar: 'ia' });
     assert.notEqual(another.profile.id, registered.profile.id);
     const recovered = await ack(player, 'player:identify', { roomCode: 'AUDITA' });
