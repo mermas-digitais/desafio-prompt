@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { io as clientSocket, type Socket } from 'socket.io-client';
 import { once } from 'node:events';
 
-test('staff ownership, transfer and participant boundaries hold end to end', { timeout: 60000 }, async () => {
+test('all staff control all rooms while account management and global maintenance remain admin-only', { timeout: 60000 }, async () => {
   const cwd = process.cwd();
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'desafio-security-'));
   const adminPassword = crypto.randomBytes(16).toString('hex');
@@ -45,12 +45,10 @@ test('staff ownership, transfer and participant boundaries hold end to end', { t
     const adminCookie = changed.cookie;
     assert.equal((await request('/api/auth/me', undefined, login.cookie)).body.user, null);
 
-    const moderatorIds: string[] = [];
     const moderatorCookies: string[] = [];
     for (const suffix of ['one', 'two']) {
       const created = await request('/api/users', { name: `Moderator ${suffix}`, email: `${suffix}@example.test`, password: 'temporary-pass-123' }, adminCookie);
       assert.equal(created.status, 201);
-      moderatorIds.push(created.body.user.id);
       assert.equal(created.body.user.passwordHash, undefined);
       const initial = await request('/api/auth/login', { email: `${suffix}@example.test`, password: 'temporary-pass-123' });
       const next = await request('/api/auth/password', { currentPassword: 'temporary-pass-123', newPassword: `new-private-password-${suffix}` }, initial.cookie);
@@ -61,12 +59,25 @@ test('staff ownership, transfer and participant boundaries hold end to end', { t
     assert.equal(created.status, 201);
     assert.equal((await request('/api/rooms/create', { roomCode: 'AUDITA', name: 'Overwrite' }, moderatorCookies[1])).status, 409);
     assert.equal((await request('/api/users', { name: 'NoPrivilege', email: 'forbidden@example.test', password: 'temporary-pass-123' }, moderatorCookies[0])).status, 403);
+    assert.equal((await request('/api/users', undefined, moderatorCookies[0])).status, 403);
     await request('/api/rooms/create', { roomCode: 'AUDITB', name: 'Arena B' }, moderatorCookies[1]);
-    assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITA' }, moderatorCookies[1])).status, 403);
-    assert.equal((await request('/api/rooms/transfer', { roomCode: 'AUDITA', moderatorId: moderatorIds[1] }, moderatorCookies[0])).status, 200);
-    assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITA' }, moderatorCookies[0])).status, 403);
+    assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITB' }, moderatorCookies[0])).status, 200);
+    assert.equal((await request('/api/rooms/open', { roomCode: 'AUDITB' }, moderatorCookies[0])).status, 200);
+    assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITA' }, moderatorCookies[1])).status, 200);
+    assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITA' }, moderatorCookies[0])).status, 200);
     assert.equal((await request('/api/rooms/close', { roomCode: 'AUDITA' }, moderatorCookies[1])).status, 200);
     await request('/api/rooms/open', { roomCode: 'AUDITA' }, moderatorCookies[1]);
+    assert.equal((await request('/api/rooms/transfer', { roomCode: 'AUDITA' }, adminCookie)).status, 404);
+    const listed = (await request('/api/rooms')).body.rooms;
+    assert.ok(listed.every((room: any) => !('moderatorId' in room)));
+    assert.equal((await request('/api/admin/ranking?room=AUDITA', undefined, moderatorCookies[1])).status, 200);
+    assert.equal((await request('/api/admin/ranking', undefined, moderatorCookies[1])).status, 403);
+    assert.equal((await request('/api/admin/clear-ranking', { confirm: true }, moderatorCookies[1])).status, 403);
+    assert.equal((await request('/api/admin/clear-ranking', { roomCode: 'AUDITA', confirm: true }, moderatorCookies[1])).status, 200);
+    const staffSocket = await connect(moderatorCookies[1]);
+    for (const event of ['room:start-with-bots', 'room:reset']) {
+      assert.equal((await ack(staffSocket, event, { roomCode: 'AUDITA' })).ok, true);
+    }
     const before = (await request('/api/rooms')).body.rooms.length;
     assert.equal((await request('/api/state?room=GHOST')).status, 404);
     assert.equal((await request('/api/rooms')).body.rooms.length, before);
@@ -108,6 +119,7 @@ test('staff ownership, transfer and participant boundaries hold end to end', { t
     assert.equal(closed.isOpen, false);
     assert.equal(closed.players.length, 1);
     assert.equal(closed.phase, 'LOBBY');
+    assert.equal((await ack(staffSocket, 'moderator:kick-player', { roomCode: 'AUDITA', playerId: registered.profile.id })).ok, true);
 
     for (let attempt = 0; attempt < 11; attempt += 1) {
       const denied = await request('/api/auth/login', { email: 'unknown@example.test', password: 'invalid-pass-123' });
@@ -116,6 +128,9 @@ test('staff ownership, transfer and participant boundaries hold end to end', { t
 
     await request('/api/auth/logout', {}, moderatorCookies[1]);
     assert.equal((await request('/api/rooms/open', { roomCode: 'AUDITA' }, moderatorCookies[1])).status, 401);
+    assert.equal((await ack(staffSocket, 'room:reset', { roomCode: 'AUDITA' })).ok, false);
+    assert.equal((await request('/api/admin/ranking', undefined, adminCookie)).status, 200);
+    assert.equal((await request('/api/admin/clear-ranking', { confirm: true }, adminCookie)).status, 200);
   } finally {
     for (const socket of sockets) socket.disconnect();
     await app.close();

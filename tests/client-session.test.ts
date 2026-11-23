@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { GameRoomState, PlayerProfile, PlayerRoundEvaluation, PublicRoomPlayer } from '../src/shared/types';
 import { isRequestedRoom, personalHistoryKey, selectOwnEvaluation, selectOwnPlayer } from '../src/client/lib/sessionHelpers';
 import { DEFAULT_ROOM_STATE, ensurePlayerSession, getOrCreateDeviceId, getSocket, useGameStore } from '../src/client/store/useGameStore';
-import { getPersonalMatchHistory, savePersonalMatch, type SavedPersonalMatch } from '../src/client/lib/personalMatchHistory';
+import { clearRoomMatchHistory, getPersonalMatchHistory, savePersonalMatch, type SavedPersonalMatch } from '../src/client/lib/personalMatchHistory';
 
 test('only requested room state can replace current state, including delayed acknowledgements', () => {
   const roomA = { ...DEFAULT_ROOM_STATE, roomCode: 'A' };
@@ -79,5 +79,27 @@ test('private player identity is issued by server before a socket connects, neve
   } finally {
     globalThis.fetch = oldFetch;
     if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow); else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('room history deletion clears all its profiles but preserves other rooms and legacy keys', () => {
+  const keys = [personalHistoryKey('A', 'one'), personalHistoryKey('A', 'two'), personalHistoryKey('AB', 'one'), 'mdx26_personal_match_history_v2_bad-json', 'mdx26_personal_match_history_legacy'];
+  const storage = new Map(keys.map((key) => [key, '[]']));
+  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    get length() { return storage.size; },
+    key: (index: number) => [...storage.keys()][index],
+    removeItem: (key: string) => storage.delete(key),
+  } });
+  try {
+    clearRoomMatchHistory('A');
+    assert.deepEqual([...storage.keys()], keys.slice(2));
+    clearRoomMatchHistory('');
+    assert.equal(storage.size, 3);
+  } finally {
+    if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow); else Reflect.deleteProperty(globalThis, 'window');
+    if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage); else Reflect.deleteProperty(globalThis, 'localStorage');
   }
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, Shield, Zap } from 'lucide-react';
+import { Lightbulb, Zap } from 'lucide-react';
 import { useSearch } from '@tanstack/react-router';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
@@ -56,25 +56,16 @@ export const TVScreen: React.FC = () => {
         intensity={phase === 'PLAYING' || phase === 'REVEALING' ? 'excited' : 'calm'}
       />
 
-      {/* Cabeçalho Oficial Limpo (Moderação concentrada exclusivamente no Card lateral de QR Code) */}
+      {/* A moderação fica no cartão do QR Code; o cabeçalho mantém a rádio. */}
       <BandeirolasHeader
         mode="tv"
         isMuted={isMuted}
         onToggleMute={toggleMute}
-        rightSlot={
-          <div className="flex items-center gap-2">
-            {isInGameHeaderMode && (
-              <>
-                <div
-                  ref={headerRadioSlotRef}
-                  className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
-                  aria-hidden="true"
-                />
-              </>
-            )}
-            <button type="button" onClick={() => setIsModerationOpen(true)} className="min-h-11 px-3 py-2 rounded-xl bg-white border border-[#DDC7F8] text-sm inline-flex items-center gap-2"><Shield className="w-4 h-4" />Moderação · {requestedCode}</button>
-          </div>
-        }
+        rightSlot={isInGameHeaderMode ? <div
+          ref={headerRadioSlotRef}
+          className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
+          aria-hidden="true"
+        /> : undefined}
       />
 
       {/* =====================================================================

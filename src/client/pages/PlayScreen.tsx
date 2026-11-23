@@ -55,6 +55,7 @@ export const PlayScreen: React.FC = () => {
   const [shareData, setShareData] = useState<ShareCardData | null>(null);
   const [shareRoundId, setShareRoundId] = useState('');
   const [isShareStudioOpen, setIsShareStudioOpen] = useState(false);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // Sessão local do Pódio no celular (permanece 60s mesmo que a TV volte para IDLE após 10s)
   const [activePodiumSession, setActivePodiumSession] = useState<ActivePodiumSession | null>(null);
@@ -217,7 +218,7 @@ export const PlayScreen: React.FC = () => {
   const activeShare = ownPodium ? ownPodium.shareData : shareRoundId === roundId ? shareData : null;
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-x-hidden pb-10">
+    <div className="org-surface min-h-screen w-full flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-x-hidden pb-10">
       <EventFloatingAssets
         variant="mobile"
         intensity={phase === 'PLAYING' ? 'excited' : 'calm'}
@@ -239,12 +240,16 @@ export const PlayScreen: React.FC = () => {
       />
 
       <main className="flex-1 w-full max-w-md mx-auto px-4 pt-4 flex flex-col gap-4 relative z-10">
-        {connectionError && <p role="alert" className="mermas-card p-4 text-red-800">{connectionError}</p>}
-        {errorMsg && <p role="alert" className="mermas-card p-4 text-red-800">{errorMsg}</p>}
-        {!myRoomSlot && !roomIsOpen && <section className="mermas-card p-5 space-y-2"><h2 className="font-display text-xl">Entradas fechadas</h2><p>A sala {currentUrlRoom} não recebe novas participantes agora. Quem já entrou pode continuar a rodada. Aguarde a organização reabrir as entradas.</p></section>}
-        {!myRoomSlot && roomIsOpen && !currentUrlRound && <section className="mermas-card p-5 space-y-2"><h2 className="font-display text-xl">Escaneie o QR da rodada</h2><p>Abra o telão da sala {currentUrlRoom} e escaneie o QR atual para entrar. Este link não contém o código da rodada.</p></section>}
-        {!profile && <p className="text-sm text-[#6E4F7D]">Sua participação usa uma sessão privada neste navegador. Se o progresso antigo não aparecer, peça à organização a recuperação. Os dados e o histórico antigos foram preservados.</p>}
-        {deviceId && <details className="mermas-card p-4 text-sm"><summary className="cursor-pointer min-h-11">Recuperar progresso anterior</summary><p className="mb-3">Mostre este código à administração e peça a verificação do vínculo anterior. Não crie outro perfil nesta sala antes da recuperação. O código identifica este navegador; não substitui sua sessão privada.</p><label className="block">Código de recuperação<input className="mermas-input w-full px-3 py-2" value={deviceId} readOnly onFocus={(event) => event.target.select()} /></label><button className="min-h-11 px-3 mt-2 rounded-xl border border-[#DDC7F8]" onClick={() => { void navigator.clipboard?.writeText(deviceId).catch(() => setErrorMsg('Não foi possível copiar. Selecione o código e copie manualmente.')); }}>Copiar código</button></details>}
+        {connectionError && <p role="alert" className="org-notice org-notice-error">{connectionError}</p>}
+        {errorMsg && <p role="alert" className="org-notice org-notice-error">{errorMsg}</p>}
+        {!myRoomSlot && !roomIsOpen && <section className="org-notice space-y-2"><h2 className="font-semibold text-lg">Entradas fechadas</h2><p>A sala {currentUrlRoom} não recebe novas participantes agora. Quem já entrou pode continuar a rodada. Aguarde a organização reabrir as entradas.</p></section>}
+        {!myRoomSlot && roomIsOpen && !currentUrlRound && <section className="org-notice space-y-2"><h2 className="font-semibold text-lg">Escaneie o QR da rodada</h2><p>Abra o telão da sala {currentUrlRoom} e escaneie o QR atual para entrar. Este link não contém o código da rodada.</p></section>}
+        {deviceId && !myRoomSlot && <details className="org-disclosure !border-0 !pt-0 text-sm"><summary>Já jogou? Recupere seu progresso</summary><div className="space-y-3">
+          <p className="org-description">Se seu progresso anterior não apareceu, peça ajuda à administração antes de criar outro perfil nesta sala. Os dados antigos foram preservados.</p>
+          <label className="org-label">Código de recuperação<input className="mermas-input org-field" value={deviceId} readOnly onFocus={(event) => event.target.select()} /></label>
+          <p className="org-description">Mostre este código à administração para verificar o vínculo. Ele identifica este navegador, mas não substitui sua sessão privada.</p>
+          <button className="org-button" onClick={async () => { try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(deviceId); setRecoveryCopied(true); } catch { setErrorMsg('Não foi possível copiar. Selecione o código e copie manualmente.'); } }}>{recoveryCopied ? 'Código copiado' : 'Copiar código'}</button><span className="sr-only" role="status">{recoveryCopied ? 'Código de recuperação copiado.' : ''}</span>
+        </div></details>}
         {/* 0. CONTROLE SUPERIOR DE PERMANÊNCIA DO PÓDIO (60s + Voltar ao Lobby) */}
         {isShowingPodium && activePodiumSession && (
           <motion.div

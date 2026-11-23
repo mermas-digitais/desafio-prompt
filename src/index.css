@@ -109,6 +109,57 @@
   box-shadow: 0 0 0 4px rgba(255, 74, 151, 0.12);
 }
 
+/* Controles da organização: a mesma marca, com hierarquia mais tranquila. */
+.org-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  min-height: 2.75rem;
+  padding: .65rem 1rem;
+  border: 1px solid var(--mermas-lilac-border);
+  border-radius: 9999px;
+  background: var(--mermas-white);
+  color: var(--mermas-plum);
+  font-size: .875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+.org-button:hover:not(:disabled) { background: var(--mermas-lilac-light); border-color: var(--mermas-purple-mid); }
+.org-button:disabled { opacity: .5; cursor: not-allowed; }
+.org-button-primary { background: var(--mermas-plum); color: var(--mermas-white); border-color: var(--mermas-plum); }
+.org-button-primary:hover:not(:disabled) { background: #542063; border-color: #542063; }
+.org-button-danger { color: #9F1239; border-color: #FDA4AF; }
+.org-button-danger:hover:not(:disabled) { background: #FFF1F2; border-color: #BE123C; }
+.org-button-quiet { background: transparent; border-color: transparent; }
+.org-surface { color: var(--mermas-plum); }
+.org-surface :is(button, a, input, select, summary):focus-visible,
+.org-button:focus-visible { outline: 3px solid var(--mermas-purple-neon); outline-offset: 3px; }
+.org-field { display: block; width: 100%; min-height: 3rem; padding: .7rem .9rem; font-size: 1rem; caret-color: var(--mermas-plum); }
+.org-field::placeholder { color: var(--mermas-purple-soft); }
+.org-label { display: grid; gap: .5rem; font-size: .875rem; font-weight: 600; }
+.org-description { color: var(--mermas-purple-soft); font-size: .875rem; line-height: 1.65; }
+.org-notice { padding: .875rem 1rem; border: 1px solid var(--mermas-lilac-border); border-radius: 1rem; background: var(--mermas-lilac-light); font-size: .875rem; line-height: 1.6; }
+.org-notice-error { background: #FFF1F2; border-color: #FDA4AF; color: #9F1239; }
+.org-notice-success { background: #ECFDF5; border-color: #A7F3D0; color: #065F46; }
+.org-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .7rem; border-radius: 9999px; background: var(--mermas-lilac-light); color: var(--mermas-plum); font-size: .75rem; font-weight: 600; }
+.org-disclosure { border-top: 1px solid var(--mermas-lilac-border); padding-top: 1rem; }
+.org-disclosure > summary { cursor: pointer; min-height: 2.75rem; align-content: center; font-weight: 600; font-size: .875rem; }
+.org-disclosure[open] > summary { margin-bottom: 1rem; }
+.org-nav { display: flex; flex-wrap: wrap; gap: .5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--mermas-lilac-border); }
+.org-nav [aria-pressed="true"] { background: var(--mermas-plum); color: var(--mermas-white); border-color: var(--mermas-plum); }
+.org-nav .org-button { padding-inline: .8rem; }
+.org-nav .org-button[aria-pressed="true"]:hover:not(:disabled) { background: #542063; border-color: #542063; }
+.org-dialog { width: calc(100% - 2rem); max-width: 34rem; max-height: calc(100dvh - 2rem); margin: auto; padding: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border: 1px solid var(--mermas-lilac-border); border-radius: 1.5rem; background: var(--mermas-white); color: var(--mermas-plum); box-shadow: 0 20px 70px rgb(51 0 67 / .2); }
+.org-dialog::backdrop { background: rgb(30 6 42 / .58); }
+.org-dialog-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-top: 4px solid var(--mermas-pink); border-bottom: 1px solid var(--mermas-lilac-border); background: var(--mermas-white); }
+.org-dialog-body { padding: 1.5rem; }
+@media (max-width: 480px) { .org-dialog-header { padding: 1rem; } .org-dialog-body { padding: 1rem; } }
+@media (prefers-reduced-motion: reduce) { .org-button { transition: none; } }
+
 /* Botão Circular Suave (buttonCircle do mermas-site-react) */
 .buttonCircle {
   display: inline-flex;

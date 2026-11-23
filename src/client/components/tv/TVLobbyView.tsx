@@ -28,12 +28,12 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
   const kickPlayer = useGameStore((s) => s.kickPlayer);
   const isOpen = useGameStore((s) => s.roomState.isOpen);
   const { canManage } = useRoomAccess(roomCode);
-  const [confirmation, setConfirmation] = useState<{ text: string; action: () => Promise<{ ok: boolean; error?: string }> } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ text: string; label: string; destructive?: boolean; action: () => Promise<{ ok: boolean; error?: string }> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const handleKick = (playerNickname: string, playerId: string, slot: PlayerSlot) => {
-    setConfirmation({ text: `Remover ${playerNickname} (posição ${slot}) da rodada na sala ${roomCode}? Ela não poderá voltar nesta rodada.`, action: () => kickPlayer({
+    setConfirmation({ label: 'Remover da rodada', destructive: true, text: `Remover ${playerNickname} (posição ${slot}) da rodada na sala ${roomCode}? Ela não poderá voltar nesta rodada.`, action: () => kickPlayer({
         roomCode,
         playerId,
         slot,
@@ -85,7 +85,7 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
 
           {canManage && <button
             type="button"
-            onClick={() => setConfirmation({ text: `Iniciar agora a rodada da sala ${roomCode}? As posições vagas serão preenchidas por bots.`, action: () => startWithBotsNow(roomCode) })}
+            onClick={() => setConfirmation({ label: 'Iniciar rodada', text: `Iniciar agora a rodada da sala ${roomCode}? As posições vagas serão preenchidas por bots.`, action: () => startWithBotsNow(roomCode) })}
             className="bg-purple-pink bg-gradient-to-r from-[#9747FF] to-[#FF4A97] hover:opacity-95 text-white font-semibold text-sm px-5 py-3.5 rounded-full shadow-sm inline-flex items-center gap-2 cursor-pointer transition-all whitespace-nowrap"
           >
             <Zap className="w-4 h-4" />
@@ -234,12 +234,12 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
         })}
       </div>
       <AccessibleDialog open={Boolean(confirmation) && canManage} title={`Confirmar ação · ${roomCode}`} onClose={() => setConfirmation(null)}>
-        <p>{confirmation?.text}</p><div className="flex gap-3 mt-5"><button className="px-4 rounded-xl border border-[#DDC7F8]" onClick={() => setConfirmation(null)}>Cancelar</button><button disabled={busy} className="px-4 rounded-xl border border-red-200 text-red-800" onClick={async () => {
+        <p className="org-description">{confirmation?.text}</p><div className="flex flex-wrap justify-end gap-2 mt-6"><button className="org-button" disabled={busy} onClick={() => setConfirmation(null)}>Voltar</button><button disabled={busy} className={`org-button ${confirmation?.destructive ? 'org-button-danger' : 'org-button-primary'}`} onClick={async () => {
           if (!confirmation || busy || !canManage) return; setBusy(true); setError('');
           try { const response = await confirmation.action(); if (!response.ok) setError(response.error || 'Ação recusada. Atualize a sala.'); }
           catch { setError('Falha de conexão. Atualize antes de repetir.'); }
           finally { setBusy(false); setConfirmation(null); }
-        }}>{busy ? 'Aguarde…' : 'Confirmar'}</button></div>
+        }}>{busy ? 'Aguarde…' : confirmation?.label}</button></div>
       </AccessibleDialog>
     </motion.div>
   );

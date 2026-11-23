@@ -32,8 +32,9 @@ Arena party game multiplayer interativa de **Inteligência Artificial & Engenhar
   * **Moderação de Nomes Impróprios (PT-BR & EN):** Filtro inteligente anti-palavrões com normalização de acentos e *leetspeak*.
 * **🛡️ Contas administrativas e moderação (`/admin`):**
   * Login por e-mail e senha, com hash scrypt, sessão HttpOnly, expiração e troca obrigatória da senha inicial.
-  * Administrador cadastra operadores. Cada sala tem um moderador responsável e pode ser transferida para outro operador.
-  * Operadores podem visualizar outras salas, mas somente o responsável ou o administrador pode controlá-las.
+  * Administrador cadastra operadores. Qualquer conta da organização pode criar e moderar qualquer sala, sem responsável exclusivo ou transferência.
+  * Cadastro de usuários, recuperação de vínculos e manutenção global continuam exclusivos do administrador. Visitantes podem assistir sem controlar.
+  * Em **Ranking → selecionar sala → Excluir sala e dados…**, qualquer moderador pode apagar a sala e seus perfis, pontos e partidas, confirmando o código exato. Inclui MDX26 e a última sala; outras salas e contas da equipe são preservadas. A plataforma continua disponível sem salas e permite criar uma nova.
   * Perfis, pontos e histórico de participantes são independentes por sala.
 * **🧠 Avaliador Semântico de Intenção em 3 Camadas:**
   1. **Primário:** **OpenAI GPT (`gpt-4o-mini` / `gpt-4o`)** via Structured JSON.
@@ -92,10 +93,10 @@ O cadastro de operadores não é público. Na primeira inicialização sem admin
 
 Em desenvolvimento, `.env.local` pode guardar configuração privada. Ele não entra no Git nem na imagem Docker. Em produção, configure as variáveis no ambiente do serviço; `DATABASE_URL` e `SESSION_SECRET` são obrigatórios. Gere o segredo com `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` e mantenha-o estável entre reinícios: trocá-lo invalida as sessões de participantes. Não compartilhe cookies nem copie senhas para arquivos versionados.
 
-**Antes de atualizar produção, faça backup completo do PostgreSQL.** A migração automática troca a unicidade global de dispositivo por `(room_code, device_id)`, mantém IDs/totais existentes e cadastra usuários, sessões e responsáveis. Há cópia de segurança dos jogadores na migração SQL e backup do JSON legado, mas isso não substitui backup externo. Não há redistribuição automática de totais já misturados por versões anteriores; eles permanecem na sala armazenada até revisão administrativa.
+**Antes de atualizar produção, faça backup completo do PostgreSQL.** A migração automática troca a unicidade global de dispositivo por `(room_code, device_id)`, mantém IDs/totais existentes e cadastra usuários e sessões. Há cópia de segurança dos jogadores na migração SQL e backup do JSON legado, mas isso não substitui backup externo. Não há redistribuição automática de totais já misturados por versões anteriores; eles permanecem na sala armazenada até revisão administrativa. A coluna legada de responsável por sala é preservada por compatibilidade, sem participar das permissões ou receber novas atribuições.
 
 As sessões antigas usavam identificadores públicos. Por isso, o navegador recebe agora uma identidade privada por cookie: informar um ID antigo não dá acesso à conta. Para recuperar um perfil legado, o administrador valida a pessoa e usa **Recuperar vínculo** com o código de recuperação mostrado no celular. A operação exige sala ociosa, preserva os pontos e rejeita conflito com outro perfil; não mescla nem apaga contas automaticamente. O histórico local antigo não é apagado nem importado para outra identidade.
 
-**Fechar entradas** oculta o QR Code e bloqueia novas participações, mantendo a rodada atual e reconexões de quem já entrou. Reiniciar/cancelar é outra ação, com confirmação. Manutenção aguarda o término de gravações em andamento. O moderador anterior perde autorização para novos comandos após a transferência.
+**Fechar entradas** oculta o QR Code e bloqueia novas participações, mantendo a rodada atual e reconexões de quem já entrou. Reiniciar/cancelar é outra ação, com confirmação. Manutenção aguarda o término de gravações em andamento. Todas as contas da organização podem controlar qualquer sala; apenas o administrador cadastra usuários e faz manutenção global.
 
 O arquivo `docs/session-security-plan.md` registra o contrato. Rode `npm test`, `npm run build` e `npx tsc --noEmit` antes de publicar. Os testes usam dados temporários; não apontam para o banco de produção. O mock de módulos usado nos testes do motor exige Node com `--experimental-test-module-mocks` (o script já inclui a opção).

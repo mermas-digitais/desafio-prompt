@@ -37,7 +37,7 @@ export interface StoredRoomRecord {
   code: string;
   name: string;
   isOpen: boolean;
-  moderatorId: string | null;
+  moderatorId: string | null; // Legacy data only; never used for authorization or new assignments.
   createdAt: string;
   updatedAt: string;
 }
@@ -122,7 +122,7 @@ export class AppDatabase {
         authAttempts: parsed.authAttempts ?? [],
         players: (parsed.players ?? []).map((p) => ({ ...p, roomCode: p.roomCode || 'MDX26' })),
         matches: (parsed.matches ?? []).map((m) => ({ ...m, roomCode: m.roomCode || 'MDX26' })),
-        rooms: parsed.rooms?.length ? parsed.rooms.map((r) => ({
+        rooms: parsed.rooms ? parsed.rooms.map((r) => ({
           code: (r.code || 'MDX26').toUpperCase(),
           name: r.name || 'Arena MDX Principal',
           isOpen: typeof r.isOpen === 'boolean' ? r.isOpen : true,
@@ -677,7 +677,10 @@ export class AppDatabase {
       };
     }
 
-    const db = this.ensureDb();
+    return this.ensureDb().transaction(async (db) => {
+    // A shared room lock prevents a pending registration from recreating orphan data after deletion.
+    const [room] = await db.select({ code: schema.rooms.code }).from(schema.rooms).where(eq(schema.rooms.code, targetRoom)).for('key share');
+    if (!room) throw new Error('Room no longer exists');
     const [inserted] = await db
       .insert(schema.players)
       .values({
@@ -705,6 +708,7 @@ export class AppDatabase {
       winsCount: inserted.winsCount,
       isBot: inserted.isBot,
     };
+    });
   }
 
   public async recordPlayerRoundStats(params: {
@@ -1073,45 +1077,11 @@ export class AppDatabase {
 
   public async getRooms(): Promise<StoredRoomRecord[]> {
     if (this.useLocalDb) {
-      if (!this.localData.rooms || this.localData.rooms.length === 0) {
-        this.localData.rooms = [
-          {
-            code: 'MDX26',
-            name: 'Arena MDX Principal',
-            isOpen: true,
-            moderatorId: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ];
-        this.saveLocalStore();
-      }
       return this.localData.rooms.map((room) => ({ ...room }));
     }
 
     const db = this.ensureDb();
     const rows = await db.select().from(schema.rooms).orderBy(desc(schema.rooms.updatedAt));
-    if (rows.length === 0) {
-      await db
-        .insert(schema.rooms)
-        .values({
-          code: 'MDX26',
-          name: 'Arena MDX Principal',
-          isOpen: true,
-          moderatorId: null,
-        })
-        .onConflictDoNothing();
-      return [
-        {
-          code: 'MDX26',
-          name: 'Arena MDX Principal',
-          isOpen: true,
-          moderatorId: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ];
-    }
     return rows.map((r) => ({
       code: r.code,
       name: r.name,
@@ -1125,27 +1095,24 @@ export class AppDatabase {
   public async upsertRoom(
     code: string,
     name: string,
-    isOpen = true,
-    moderatorId?: string | null
+    isOpen = true
   ): Promise<StoredRoomRecord> {
     const cleanCode = (code || 'MDX26').toUpperCase().trim();
     const cleanName = (name || `Sala ${cleanCode}`).trim();
     const nowIso = new Date().toISOString();
-    if (moderatorId && !(await this.findStaffUserById(moderatorId))) throw new Error('Unknown staff user');
 
     if (this.useLocalDb) {
       const idx = this.localData.rooms.findIndex((r) => r.code === cleanCode);
       if (idx !== -1) {
         this.localData.rooms[idx].name = cleanName;
         this.localData.rooms[idx].isOpen = isOpen;
-        if (moderatorId !== undefined) this.localData.rooms[idx].moderatorId = moderatorId;
         this.localData.rooms[idx].updatedAt = nowIso;
       } else {
         this.localData.rooms.push({
           code: cleanCode,
           name: cleanName,
           isOpen,
-          moderatorId: moderatorId ?? null,
+          moderatorId: null,
           createdAt: nowIso,
           updatedAt: nowIso,
         });
@@ -1161,7 +1128,7 @@ export class AppDatabase {
         code: cleanCode,
         name: cleanName,
         isOpen,
-        moderatorId: moderatorId ?? null,
+        moderatorId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1170,7 +1137,6 @@ export class AppDatabase {
         set: {
           name: cleanName,
           isOpen,
-          ...(moderatorId === undefined ? {} : { moderatorId }),
           updatedAt: new Date(),
         },
       }).returning();
@@ -1186,22 +1152,44 @@ export class AppDatabase {
   }
 
   /** Room creation must not use the edit/upsert path: duplicate codes are rejected atomically. */
-  public async createRoom(code: string, name: string, moderatorId: string): Promise<StoredRoomRecord> {
+  public async createRoom(code: string, name: string): Promise<StoredRoomRecord> {
     const cleanCode = code.toUpperCase().trim();
     const cleanName = name.trim();
     if (!cleanCode || cleanCode.length > 32 || !cleanName || cleanName.length > 120) throw new Error('Invalid room');
-    if (!(await this.findStaffUserById(moderatorId))) throw new Error('Unknown staff user');
     if (this.useLocalDb) {
       if (this.localData.rooms.some((r) => r.code === cleanCode)) throw new Error('Room already exists');
       const now = new Date().toISOString();
-      const room = { code: cleanCode, name: cleanName, isOpen: true, moderatorId, createdAt: now, updatedAt: now };
+      const room = { code: cleanCode, name: cleanName, isOpen: true, moderatorId: null, createdAt: now, updatedAt: now };
       this.localData.rooms.push(room);
       this.saveLocalStore();
       return { ...room };
     }
-    const [room] = await this.ensureDb().insert(schema.rooms).values({ code: cleanCode, name: cleanName, moderatorId }).onConflictDoNothing().returning();
+    const [room] = await this.ensureDb().insert(schema.rooms).values({ code: cleanCode, name: cleanName }).onConflictDoNothing().returning();
     if (!room) throw new Error('Room already exists');
     return { ...room, createdAt: room.createdAt.toISOString(), updatedAt: room.updatedAt.toISOString() };
+  }
+
+  public async deleteRoom(code: string): Promise<boolean> {
+    const roomCode = code.toUpperCase().trim();
+    if (this.useLocalDb) {
+      if (!this.localData.rooms.some((room) => room.code === roomCode)) return false;
+      const previous = this.localData;
+      this.localData = { ...previous,
+        rooms: previous.rooms.filter((room) => room.code !== roomCode),
+        players: previous.players.filter((player) => player.roomCode !== roomCode),
+        matches: previous.matches.filter((match) => match.roomCode !== roomCode),
+      };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return true;
+    }
+    return this.ensureDb().transaction(async (db) => {
+      const [room] = await db.select({ code: schema.rooms.code }).from(schema.rooms).where(eq(schema.rooms.code, roomCode)).for('update');
+      if (!room) return false;
+      await db.delete(schema.matches).where(eq(schema.matches.roomCode, roomCode));
+      await db.delete(schema.players).where(eq(schema.players.roomCode, roomCode));
+      await db.delete(schema.rooms).where(eq(schema.rooms.code, roomCode));
+      return true;
+    });
   }
 
   public async setRoomStatus(code: string, isOpen: boolean): Promise<boolean> {
@@ -1357,31 +1345,6 @@ export class AppDatabase {
       RETURNING attempts
     `);
     return Number(result.rows[0].attempts) <= limit;
-  }
-
-  public async setRoomModerator(code: string, userId: string | null): Promise<boolean> {
-    if (userId && !(await this.findStaffUserById(userId))) throw new Error('Unknown staff user');
-    const roomCode = code.toUpperCase().trim();
-    if (this.useLocalDb) {
-      const room = this.localData.rooms.find((r) => r.code === roomCode);
-      if (!room) return false;
-      room.moderatorId = userId;
-      room.updatedAt = new Date().toISOString();
-      this.saveLocalStore();
-      return true;
-    }
-    const rows = await this.ensureDb().update(schema.rooms).set({ moderatorId: userId, updatedAt: new Date() }).where(eq(schema.rooms.code, roomCode)).returning({ code: schema.rooms.code });
-    return rows.length > 0;
-  }
-
-  public async assignUnownedRooms(userId: string): Promise<void> {
-    if (!(await this.findStaffUserById(userId))) throw new Error('Unknown staff user');
-    if (this.useLocalDb) {
-      for (const room of this.localData.rooms) if (!room.moderatorId) room.moderatorId = userId;
-      this.saveLocalStore();
-      return;
-    }
-    await this.ensureDb().update(schema.rooms).set({ moderatorId: userId, updatedAt: new Date() }).where(sql`${schema.rooms.moderatorId} IS NULL`);
   }
 
   public async getGlobalStats(): Promise<{

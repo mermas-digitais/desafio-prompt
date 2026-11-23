@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --import tsx --experimental-test-module-mocks --test tests/*.test.ts",
+    "test:ui:serve": "node --import tsx tests/serve-ui-fixture.mjs",
     "test:coverage": "node --import tsx --experimental-test-module-mocks --test --experimental-test-coverage tests/*.test.ts",
     "dev": "concurrently -k -n SERVER,WEB -c magenta,cyan \"npm run dev:server\" \"npm run dev:web\"",
     "dev:server": "tsx watch src/server/index.ts",

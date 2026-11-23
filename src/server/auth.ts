@@ -80,10 +80,9 @@ export class AuthService {
       if (existing) throw new Error('E-mail inicial já pertence a um operador. Configure um administrador explicitamente.');
       await database.createStaffUser({ email, name: 'Administrador', role: 'admin', passwordHash: await hashPassword(password), mustChangePassword: true });
     }
-    const admin = (await database.getStaffUsers()).find((u) => u.role === 'admin');
-    if (admin) {
-      await database.getRooms();
-      await database.assignUnownedRooms(admin.id);
+    // Bootstrap only once; deliberately deleting every room must survive restarts.
+    if (users.length === 0 && (await database.getRooms()).length === 0) {
+      await database.createRoom('MDX26', 'Arena MDX Principal');
     }
   }
 
@@ -181,7 +180,7 @@ export class AuthService {
       return { ok: true, user: next };
     });
     app.get('/api/users', async (req) => {
-      await this.requireUser(req.headers);
+      await this.requireAdmin(req.headers);
       return { ok: true, users: await database.getStaffUsers() };
     });
     app.post('/api/users', async (req, reply) => {

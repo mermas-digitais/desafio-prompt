@@ -82,6 +82,7 @@ export const rooms = pgTable('rooms', {
   code: varchar('code', { length: 32 }).primaryKey(),
   name: varchar('name', { length: 120 }).notNull(),
   isOpen: boolean('is_open').notNull().default(true),
+  // Legacy column retained for compatibility, not room authorization.
   moderatorId: uuid('moderator_id').references(() => staffUsers.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

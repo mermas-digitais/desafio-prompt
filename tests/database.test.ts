@@ -120,24 +120,16 @@ test('rate limits count unknown identities and reset expired windows', async () 
   assert.equal(await db.consumeAuthAttempt('expired', 1, 1), true);
 });
 
-test('room owner survives edits and can be transferred without changing players', async () => {
+test('rooms can be created without an owner, edits preserve players and duplicates are rejected', async () => {
   const db = fresh();
-  const user = await db.createStaffUser({ email: 'm@example.com', name: 'M', role: 'moderator', passwordHash: 'hash', mustChangePassword: false });
-  await db.upsertRoom('A', 'Arena', true, user.id);
+  await db.createRoom('A', 'Arena');
+  const original = await player(db, 'A');
   await db.upsertRoom('A', 'Renamed', false);
-  assert.equal((await db.getRooms()).find((r) => r.code === 'A')?.moderatorId, user.id);
-  await db.upsertRoom('B', 'Unowned');
-  await db.assignUnownedRooms(user.id);
-  assert.equal((await db.getRooms()).find((r) => r.code === 'B')?.moderatorId, user.id);
-  assert.equal(await db.setRoomModerator('A', null), true);
-  assert.equal(await db.setRoomModerator('missing', user.id), false);
-  await assert.rejects(db.setRoomModerator('A', 'unknown'));
-  const next = await db.createStaffUser({ email: 'next@example.com', name: 'Next', role: 'moderator', passwordHash: 'hash', mustChangePassword: false });
-  assert.equal(await db.setRoomModerator('A', next.id), true);
-  assert.equal((await db.getRooms()).find((r) => r.code === 'A')?.moderatorId, next.id);
-  await assert.rejects(db.createRoom('A', 'Overwrite', user.id));
+  assert.equal((await db.getRooms()).find((r) => r.code === 'A')?.moderatorId, null);
+  assert.equal((await db.findPlayerByDeviceId('same-device', 'A'))?.id, original.id);
+  await assert.rejects(db.createRoom('A', 'Overwrite'));
   assert.equal((await db.getRooms()).find((r) => r.code === 'A')?.name, 'Renamed');
-  assert.equal((await db.createRoom('C', 'New', user.id)).moderatorId, user.id);
+  assert.equal((await db.createRoom('C', 'New')).moderatorId, null);
 });
 
 test('PostgreSQL stats use row locks and atomic room-scoped increments', async () => {

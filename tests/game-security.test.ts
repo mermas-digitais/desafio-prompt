@@ -10,7 +10,7 @@ const db = {
   createRoom: mock.fn(async (..._args: any[]) => {}),
   upsertRoom: mock.fn(async (..._args: any[]) => {}),
   setRoomStatus: mock.fn(async (..._args: any[]) => {}),
-  setRoomModerator: mock.fn(async (..._args: any[]) => {}),
+  deleteRoom: mock.fn(async (..._args: any[]) => true),
   recordPlayerRoundStats: mock.fn(async (..._args: any[]) => ({ newHighScore: false, updatedProfile: null })),
   recordMatch: mock.fn(async (..._args: any[]) => {}),
   commitRound: mock.fn(async (params: any, enrich: (updates: Map<string, any>) => any[]) => enrich(new Map(params.players.map((player: any) => [player.deviceId, { newHighScore: false, updatedProfile: null }])))),
@@ -93,28 +93,22 @@ test('reset invalidates delayed AI evaluation before any persistence', async () 
   assert.equal(db.commitRound.mock.callCount(), before);
 });
 
-test('room ownership persists; duplicate and invalid creation rejected; failed writes preserve state', async () => {
+test('rooms need no owner; duplicate and invalid creation rejected; failed writes preserve state', async () => {
   const { io } = fixture();
   const manager = new RoomManager(io as any);
   try {
-    await manager.createRoom({ roomCode: 'ROOM1', name: 'One', moderatorId: 'owner' });
-    assert.deepEqual(db.createRoom.mock.calls.at(-1)!.arguments, ['ROOM1', 'One', 'owner']);
-    assert.equal(manager.getModeratorId('room1'), 'owner');
-    assert.equal(manager.listRooms()[0].moderatorId, 'owner');
-    assert.equal((await manager.createRoom({ roomCode: 'ROOM1', name: 'Overwrite', moderatorId: 'other' })).ok, false);
-    assert.equal((await manager.createRoom({ roomCode: 'TOO-LONG-CODE-123', name: 'Bad', moderatorId: 'owner' })).ok, false);
+    await manager.createRoom({ roomCode: 'ROOM1', name: 'One' });
+    assert.deepEqual(db.createRoom.mock.calls.at(-1)!.arguments, ['ROOM1', 'One']);
+    assert.equal('moderatorId' in manager.listRooms()[0], false);
+    assert.equal((await manager.createRoom({ roomCode: 'ROOM1', name: 'Overwrite' })).ok, false);
+    assert.equal((await manager.createRoom({ roomCode: 'TOO-LONG-CODE-123', name: 'Bad' })).ok, false);
     assert.equal((await manager.openRoom({ roomCode: 'UNKNOWN', name: 'Unknown' })).ok, false);
-    await manager.transferModeration('ROOM1', 'next');
-    assert.equal(manager.getModeratorId('ROOM1'), 'next');
     db.upsertRoom.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
     await assert.rejects(manager.openRoom({ roomCode: 'ROOM1', name: 'Not persisted' }));
     assert.equal(manager.getRoom('ROOM1')!.getState().roomName, 'One');
     db.setRoomStatus.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
     await assert.rejects(manager.closeRoom('ROOM1'));
     assert.equal(manager.getRoom('ROOM1')!.getState().isOpen, true);
-    db.setRoomModerator.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
-    await assert.rejects(manager.transferModeration('ROOM1', 'bad'));
-    assert.equal(manager.getModeratorId('ROOM1'), 'next');
   } finally {
     manager.dispose();
   }
@@ -194,20 +188,20 @@ test('archive holds last 100 rounds, and disposal clears timer', async () => {
   assert.equal((engine as any).tickInterval, null);
 });
 
-test('initialization restores moderator, total room count and concurrent duplicates stay bounded', async () => {
+test('initialization ignores legacy owner; total room count and concurrent duplicates stay bounded', async () => {
   const { io } = fixture();
   const manager = new RoomManager(io as any);
   db.getRooms.mock.mockImplementationOnce(async () => [{ code: 'MDX26', name: 'Stored', isOpen: false, moderatorId: 'stored-owner' }]);
   try {
     await manager.init();
-    assert.equal(manager.getModeratorId('MDX26'), 'stored-owner');
-    const pending = manager.createRoom({ roomCode: 'RACE', name: 'Race', moderatorId: 'owner' });
-    assert.equal((await manager.createRoom({ roomCode: 'RACE', name: 'Race2', moderatorId: 'other' })).ok, false);
+    assert.equal('moderatorId' in manager.listRooms()[0], false);
+    const pending = manager.createRoom({ roomCode: 'RACE', name: 'Race' });
+    assert.equal((await manager.createRoom({ roomCode: 'RACE', name: 'Race2' })).ok, false);
     await pending;
     for (let i = 0; i < 98; i += 1) {
-      assert.equal((await manager.createRoom({ roomCode: `R${i}`, name: 'Bounded', moderatorId: 'owner' })).ok, true);
+      assert.equal((await manager.createRoom({ roomCode: `R${i}`, name: 'Bounded' })).ok, true);
     }
-    assert.equal((await manager.createRoom({ roomCode: 'OVERFLOW', name: 'Overflow', moderatorId: 'owner' })).ok, false);
+    assert.equal((await manager.createRoom({ roomCode: 'OVERFLOW', name: 'Overflow' })).ok, false);
     assert.equal(manager.listRooms().length, 100);
   } finally {
     manager.dispose();
@@ -230,15 +224,64 @@ test('closing entries during evaluation preserves the valid result', async () =>
   assert.equal(engine.isCommittingRound(), false);
 });
 
-test('database creation collisions never publish an engine or replace ownership', async () => {
+test('database creation collisions never publish an engine', async () => {
   const { io } = fixture();
   const manager = new RoomManager(io as any);
   db.createRoom.mock.mockImplementationOnce(async () => { throw new Error('Room already exists'); });
-  await assert.rejects(manager.createRoom({ roomCode: 'COLLISION', name: 'Collision', moderatorId: 'owner' }));
+  await assert.rejects(manager.createRoom({ roomCode: 'COLLISION', name: 'Collision' }));
   assert.equal(manager.getRoom('COLLISION'), undefined);
-  assert.equal(manager.getModeratorId('COLLISION'), null);
   assert.equal((manager as any).creating.size, 0);
   manager.dispose();
+});
+
+test('deletion blocks evaluation, persistence and edits; failed deletion resumes the same round', async () => {
+  const { io, events } = fixture();
+  const manager = new RoomManager(io as any);
+  try {
+    await manager.createRoom({ roomCode: 'A', name: 'A' });
+    const engine = manager.getRoom('A')!;
+    const token = engine.getState().roundToken;
+    for (const flag of ['isEvaluating', 'committingRounds']) {
+      (engine as any)[flag] = 1;
+      assert.equal((await manager.deleteRoom('A')).ok, false);
+      (engine as any)[flag] = 0;
+    }
+    const edit = deferred<void>();
+    db.setRoomStatus.mock.mockImplementationOnce(async () => edit.promise);
+    const closing = manager.closeRoom('A');
+    assert.equal((await manager.deleteRoom('A')).ok, false);
+    edit.resolve();
+    await closing;
+    const deletion = deferred<boolean>();
+    db.deleteRoom.mock.mockImplementationOnce(async () => deletion.promise);
+    const pending = manager.deleteRoom('A');
+    assert.equal(manager.getRoom('A'), undefined);
+    assert.equal((await manager.openRoom({ roomCode: 'A', name: 'Changed' })).ok, false);
+    assert.equal((await manager.createRoom({ roomCode: 'A', name: 'Changed' })).ok, false);
+    assert.equal((engine as any).tickInterval, null);
+    await (engine as any).tick();
+    deletion.reject(new Error('disk full'));
+    await assert.rejects(pending, /disk full/);
+    assert.equal(manager.getRoom('A'), engine);
+    assert.equal(engine.getState().roundToken, token);
+    assert.ok((engine as any).tickInterval);
+    engine.joinRoom(profile(), 'socket', token);
+    const refresh = deferred<typeof boards>();
+    db.getLeaderboards.mock.mockImplementationOnce(async () => refresh.promise);
+    const refreshing = engine.refreshLeaderboards();
+    assert.equal((await manager.deleteRoom('A')).ok, true);
+    const count = events.length;
+    refresh.resolve(boards);
+    await refreshing;
+    engine.broadcastState();
+    engine.resume();
+    assert.equal(events.length, count);
+    assert.equal((engine as any).tickInterval, null);
+    assert.deepEqual(engine.getState().players, []);
+    assert.equal((engine as any).completedRounds.size, 0);
+    assert.equal(manager.getRoom(), undefined);
+    assert.deepEqual(manager.listRooms(), []);
+  } finally { manager.dispose(); }
 });
 
 test('atomic round enrichment matches profile IDs and publishes updated room scores only after commit', async () => {

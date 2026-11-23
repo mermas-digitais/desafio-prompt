@@ -46,6 +46,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
               <button
                 type="button"
                 onClick={onOpenModeration}
+                aria-label={`Abrir moderação da sala ${roomCode}`}
                 className="mt-2 py-3 px-5 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#D01F6B] hover:opacity-95 text-white font-display text-xs lg:text-sm flex items-center gap-2 shadow-sm cursor-pointer transition-all"
               >
                 <DoorOpen className="w-4 h-4" />
@@ -123,6 +124,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
               <button
                 type="button"
                 onClick={onOpenModeration}
+                aria-label={`Abrir moderação da sala ${roomCode}`}
                 title="Abrir painel de moderação da sala"
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-white hover:bg-[#F5F0FF] border border-[#DDC7F8] text-xs font-bold text-[#4C1D95] transition-colors whitespace-nowrap cursor-pointer shadow-2xs"
               >

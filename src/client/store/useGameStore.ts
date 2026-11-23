@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import type { AvatarId, ExpiredRoundSummary, GameRoomState, PlayerProfile, PlayerSlot } from '../../shared/types';
 import { api } from '../lib/api';
 import { isRequestedRoom } from '../lib/sessionHelpers';
+import { clearRoomMatchHistory } from '../lib/personalMatchHistory';
 
 export const DEFAULT_ROOM_STATE: GameRoomState = {
   roomCode: 'MDX26', roomName: 'Arena MDX Principal', isOpen: false,
@@ -106,6 +107,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       socket.on('connect_error', () => set({ connectionError: 'Sem conexão com a sala. Tentando reconectar…' }));
       socket.on('operation:error', (response: { error?: string }) => set({ connectionError: response.error || 'Ação recusada. Atualize a sala.' }));
       socket.on('room:state', (state: GameRoomState) => get().setRoomState(state));
+      socket.on('room:deleted', (payload: { roomCode: string }) => {
+        clearRoomMatchHistory(payload.roomCode);
+        if (payload.roomCode !== get().requestedRoomCode) return;
+        set({ roomState: { ...DEFAULT_ROOM_STATE, roomCode: payload.roomCode }, kickedReason: null, connectionError: 'Esta sala foi excluída pela organização.' });
+        if (window.location.pathname === '/tv' || window.location.pathname === '/play') window.location.assign('/');
+      });
       socket.on('player:kicked', (payload: { reason?: string; roomCode?: string }) => {
         if (!payload.roomCode || payload.roomCode === get().requestedRoomCode) set({ kickedReason: payload.reason || 'Você foi removida desta rodada.' });
       });

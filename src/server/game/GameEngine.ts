@@ -68,6 +68,8 @@ export class GameEngine {
   };
 
   private tickInterval: NodeJS.Timeout | null = null;
+  private paused = false;
+  private disposed = false;
   private botSchedules: BotTargetSchedule[] = [];
   private isEvaluating = false;
   private committingRounds = 0;
@@ -222,16 +224,31 @@ export class GameEngine {
     this.leaderboards = await database.getLeaderboards(100, this.roomCode);
     this.pickNextChallenge();
 
+    this.resume();
+  }
+
+  public resume(): void {
+    if (this.disposed) return;
+    this.paused = false;
     if (this.tickInterval) clearInterval(this.tickInterval);
     this.tickInterval = setInterval(() => {
       this.tick().catch((err) => console.error('❌ [GameEngine] Erro no tick:', err));
     }, 1000);
   }
 
-  public dispose(): void {
+  public pause(): void {
+    this.paused = true;
     if (this.tickInterval) clearInterval(this.tickInterval);
     this.tickInterval = null;
+  }
+
+  public dispose(): void {
+    this.pause();
+    this.disposed = true;
     this.generation += 1;
+    this.players = [];
+    this.evaluations = [];
+    this.completedRounds.clear();
   }
 
   public isEvaluatingRound(): boolean {
@@ -378,6 +395,7 @@ export class GameEngine {
   }
 
   public broadcastState(): void {
+    if (this.disposed) return;
     const state = this.getState();
     this.io.to(this.roomCode).emit('room:state', state);
   }
@@ -869,6 +887,7 @@ export class GameEngine {
   }
 
   private async tick(): Promise<void> {
+    if (this.paused || this.disposed) return;
     switch (this.phase) {
       case 'IDLE': {
         break;

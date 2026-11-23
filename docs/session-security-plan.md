@@ -1,11 +1,13 @@
 # Contas, salas e moderação — contrato de implementação
 
+Atualizado em 2026-11-23: o usuário substituiu o responsável por sala por moderação compartilhada entre todas as contas da organização. Cadastro de usuários e manutenção global continuam exclusivos do administrador.
+
 ## Objetivo
 Corrigir a auditoria da v1.1.0 sem apagar perfis, partidas ou rankings existentes. Mesmo dispositivo tem perfis independentes por sala. Fechar entradas preserva rodada atual. Cadastro de operadores é feito pelo administrador; não há inscrição pública.
 
 ## Papéis
-- Admin global: cria operadores, acessa manutenção global e pode recuperar a administração das salas.
-- Moderador: cria salas, controla somente salas das quais é responsável, pode transferir responsabilidade a outro operador ativo.
+- Admin global: cria operadores, controla qualquer sala, acessa manutenção global e recupera vínculos de perfis legados.
+- Moderador: qualquer conta cadastrada da organização pode criar e controlar qualquer sala, após a troca inicial de senha. Não cadastra usuários nem faz manutenção global. Não há atribuição nem transferência de salas.
 - Visitante: vê salas/telões, sem controles administrativos.
 - Participante: sessão anônima privada por cookie; atua somente no próprio perfil da sala.
 
@@ -14,17 +16,18 @@ Corrigir a auditoria da v1.1.0 sem apagar perfis, partidas ou rankings existente
 - `POST /api/auth/login` `{email,password}` -> cookie HttpOnly + `{ok:true,user}`.
 - `POST /api/auth/logout` -> revoga cookie/sessão.
 - `POST /api/auth/password` `{currentPassword,newPassword}` -> altera hash/revoga sessões anteriores, emite nova sessão.
-- `GET /api/users` -> lista pública de operadores `{id,name,email,role}` para seleção de transferência, exige login.
+- `GET /api/users` -> lista de operadores para gestão da equipe; somente admin.
 - `POST /api/users` `{name,email,password}` -> somente admin, cria moderador com troca inicial obrigatória.
 - `POST /api/player/session` -> cookie privado novo/recuperado + `{ok:true,deviceId}`; não aceita identidade arbitrária do cliente.
-- `POST /api/rooms/create` `{roomCode,name}` -> operador autenticado se torna moderador.
-- `POST /api/rooms/open|close` `{roomCode,name?}` -> responsável ou admin.
-- `POST /api/rooms/transfer` `{roomCode,moderatorId}` -> responsável ou admin; efeito imediato em REST e socket.
+- `POST /api/rooms/create` `{roomCode,name}` -> qualquer conta da organização autenticada cria a sala, sem responsável exclusivo.
+- `POST /api/rooms/open|close` `{roomCode,name?}` -> qualquer conta da organização autenticada.
+- `DELETE /api/rooms/:code?confirm=CODE` -> qualquer conta da organização autenticada, com troca inicial concluída e confirmação exata. Apaga somente a sala e seus perfis, pontos e partidas; não altera equipe ou outras salas.
+- Não existe endpoint de transferência; a rota antiga retorna 404.
 - Administração de ranking segue endpoints existentes, com cookie de operador e escopo explícito de sala; manutenção global apenas admin.
 
 ## Tipos
 `StaffUser={id,email,name,role:'admin'|'moderator',mustChangePassword,createdAt}`.
-Salas incluem `moderatorId:string|null`; cadastro existente sem responsável é atribuído ao admin inicial, sem alterar jogadores.
+O estado público das salas não inclui responsável. A coluna legada `moderator_id` é mantida no banco por compatibilidade, mas não participa das permissões nem recebe novas atribuições. Não é necessário apagar salas ou jogadores para adotar o novo modelo.
 Dados públicos de participantes nunca incluem deviceId, socketId ou rascunhos. Perfil pessoal recuperado por cookie; servidor ignora identidade de payload.
 
 ## Persistência
@@ -36,8 +39,15 @@ Fechar entradas altera somente isOpen. Participantes já vinculados podem termin
 ## Migração de identidade anônima
 IDs antigos eram públicos, portanto não são prova de posse. Novas sessões privadas não podem reivindicar outro perfil apenas informando deviceId. Preservar dados legados; qualquer recuperação de vínculo legado precisa de verificação administrativa, nunca apropriação automática por ID público.
 
+## Exclusão de salas
+MDX26 e a última sala podem ser excluídas. Uma lista intencionalmente vazia permanece vazia após reiniciar; a sala inicial só é criada no primeiro bootstrap de administrador. Healthcheck, configuração, sockets e interface funcionam sem salas. Recriar o código inicia sem os perfis e partidas anteriores.
+
+A exclusão é transacional em PostgreSQL; o armazenamento local restaura o estado em memória se a gravação falhar. Registro de participante usa bloqueio compartilhado da linha da sala, enquanto a exclusão usa bloqueio exclusivo: o registro termina antes da limpeza ou falha por sala inexistente. Avaliação, gravação de resultado e edição de sala em andamento impedem exclusão. O motor fica pausado durante a exclusão, volta se houver falha e é descartado no sucesso, sem timer ou broadcasts tardios.
+
+O evento público `room:deleted` informa somente o código, remove os sockets daquele canal e faz telão/celular conectados voltarem ao início. Clientes conectados limpam as chaves v2 de histórico local atribuíveis à sala; chaves legadas mistas não são apagadas por suposição. A exclusão no servidor **não apaga cópias de navegadores offline, imagens baixadas ou backups independentes**. Estes seguem sua própria retenção; restaurar um backup pode trazer dados antigos de volta.
+
 ## Validação
-Testes unitários e integração em banco temporário: isolamento A/B; usuário/senha/hash/sessão; moderador alheio recebe 403; transferência revoga poder do anterior; visitante não reseta/inicia bots; payload de identidade não personifica terceiros; fechamento preserva rodada; cancelamento impede avaliação tardia; token obrigatório; expulso não retorna; GET desconhecido não cria sala; produção sem banco falha. UI: teclado/foco/Escape, confirmação contextual e telas baixas, erros/timeouts.
+Testes unitários e integração em banco temporário: isolamento A/B; usuário/senha/hash/sessão; duas contas distintas controlam a mesma sala em REST e socket; ambas são impedidas de cadastrar usuários e fazer manutenção global; visitante não reseta/inicia bots; payload de identidade não personifica terceiros; fechamento preserva rodada; cancelamento impede avaliação tardia; token obrigatório; expulso não retorna; GET desconhecido não cria sala; produção sem banco falha. UI: controles disponíveis para a organização em todas as salas, sem seletor de responsável; teclado/foco/Escape, confirmação contextual e telas baixas, erros/timeouts.
 
 ## Escopo operacional
 Implementar e validar localmente. Não publicar, reiniciar produção, migrar banco real ou alterar credenciais remotas sem autorização específica.

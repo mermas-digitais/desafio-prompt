@@ -57,6 +57,21 @@ export function clearPersonalMatchHistory(roomCode: string, profileId: string): 
   }
 }
 
+export function clearRoomMatchHistory(roomCode: string): void {
+  if (typeof window === 'undefined' || !roomCode) return;
+  const prefix = 'mdx26_personal_match_history_v2_';
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index--) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      try {
+        const identity = JSON.parse(key.slice(prefix.length));
+        if (Array.isArray(identity) && identity[0] === roomCode) localStorage.removeItem(key);
+      } catch { /* An unrelated malformed key must not block cleanup. */ }
+    }
+  } catch { /* Server deletion must still succeed when browser storage is unavailable. */ }
+}
+
 export function formatRelativeTime(timestamp: number): string {
   const diffMs = Date.now() - timestamp;
   const diffSec = Math.floor(diffMs / 1000);

@@ -14,7 +14,6 @@ import { validateNickname } from './moderation/profanityFilter.js';
 import { RoomManager } from './game/RoomManager.js';
 import { AuthService, HttpError, requestError } from './auth.js';
 import { registerMusicRoutes } from './musicRoutes.js';
-import type { StaffUser } from '../shared/types.js';
 
 const roomCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{1,12}$/);
 const roomInput = z.object({ roomCode: roomCodeSchema });
@@ -61,17 +60,15 @@ export async function createApplication() {
   await roomManager.init();
 
   const getEngine = (raw?: string) => {
-    const code = roomCodeSchema.parse(raw || 'MDX26');
+    const code = raw ? roomCodeSchema.parse(raw) : undefined;
     const engine = roomManager.getRoom(code);
     if (!engine) throw new HttpError(404, 'Esta sala não existe. Abra uma sala disponível na página inicial.');
     return engine;
   };
-  const authorizeRoom = async (headers: { cookie?: string }, raw: string): Promise<StaffUser> => {
-    const user = await auth.requireUser(headers);
+  const authorizeRoom = async (headers: { cookie?: string }, raw: string): Promise<void> => {
+    await auth.requireUser(headers);
     const code = roomCodeSchema.parse(raw);
     getEngine(code);
-    if (user.role !== 'admin' && roomManager.getModeratorId(code) !== user.id) throw new HttpError(403, 'Somente o moderador responsável pode controlar esta sala.');
-    return user;
   };
   const roomsUpdated = () => io.emit('rooms:updated', roomManager.listRooms());
   const refreshRooms = async () => {
@@ -85,17 +82,18 @@ export async function createApplication() {
   };
 
   fastify.get<{ Querystring: { room?: string } }>('/api/health', async (req) => {
-    const engine = getEngine(roomQuery.parse(req.query).room);
-    const state = engine.getState();
-    return { status: 'ok', service: 'desafio-prompt-mdx26', database: database.getDatabaseVersion(), spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', aiProviders: { openaiConfigured: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'sua-chave-aqui'), groqConfigured: Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'sua-chave-aqui'), localFallback: true }, roomPhase: state.phase, roomCode: state.roomCode, roomName: state.roomName, isOpen: state.isOpen, timestamp: new Date().toISOString() };
+    const requested = roomQuery.parse(req.query).room;
+    const state = requested ? getEngine(requested).getState() : roomManager.getRoom()?.getState();
+    return { status: 'ok', service: 'desafio-prompt-mdx26', database: database.getDatabaseVersion(), spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', aiProviders: { openaiConfigured: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'sua-chave-aqui'), groqConfigured: Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'sua-chave-aqui'), localFallback: true }, roomPhase: state?.phase ?? null, roomCode: state?.roomCode ?? null, roomName: state?.roomName ?? null, isOpen: state?.isOpen ?? false, timestamp: new Date().toISOString() };
   });
   fastify.get<{ Querystring: { room?: string } }>('/api/config', async (req) => {
     const isProd = process.env.NODE_ENV === 'production';
     const { primaryIp, allIps } = getLanAddresses();
     const raw = (process.env.PUBLIC_APP_URL || process.env.VITE_PUBLIC_APP_URL || (isProd ? 'https://dprompt.mermasdigitais.com.br' : '')).trim();
     const validPublic = raw && !/localhost|127\.0\.0\.1|0\.0\.0\.0|^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/|$)/i.test(raw);
-    const state = getEngine(roomQuery.parse(req.query).room).getState();
-    return { spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', roomCode: state.roomCode, roomName: state.roomName, isOpen: state.isOpen, roundToken: state.roundToken, lanIp: isProd ? '' : primaryIp, allLanIps: isProd ? [] : allIps, publicAppUrl: validPublic ? raw.replace(/\/+$/, '') : isProd ? 'https://dprompt.mermasdigitais.com.br' : '' };
+    const requested = roomQuery.parse(req.query).room;
+    const state = requested ? getEngine(requested).getState() : roomManager.getRoom()?.getState();
+    return { spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', roomCode: state?.roomCode ?? '', roomName: state?.roomName ?? '', isOpen: state?.isOpen ?? false, roundToken: state?.roundToken ?? '', lanIp: isProd ? '' : primaryIp, allLanIps: isProd ? [] : allIps, publicAppUrl: validPublic ? raw.replace(/\/+$/, '') : isProd ? 'https://dprompt.mermasdigitais.com.br' : '' };
   });
   registerMusicRoutes(fastify);
 
@@ -156,10 +154,10 @@ export async function createApplication() {
   fastify.get('/api/metrics/global', async () => ({ ok: true, stats: await database.getGlobalStats() }));
 
   fastify.post('/api/rooms/create', async (req, reply) => {
-    const user = await auth.requireUser(req.headers);
+    await auth.requireUser(req.headers);
     const input = roomInput.extend({ name: z.string().trim().min(2).max(120) }).parse(req.body);
     if (roomManager.getRoom(input.roomCode)) throw new HttpError(409, 'Este código já pertence a outra sala.');
-    const result = await roomManager.createRoom({ ...input, moderatorId: user.id });
+    const result = await roomManager.createRoom(input);
     if (!result.ok) throw new HttpError(409, result.error || 'Não foi possível criar esta sala.');
     roomsUpdated();
     reply.code(201);
@@ -175,18 +173,21 @@ export async function createApplication() {
   fastify.post('/api/rooms/close', async (req) => {
     const input = roomInput.parse(req.body);
     await authorizeRoom(req.headers, input.roomCode);
-    await roomManager.closeRoom(input.roomCode);
+    const result = await roomManager.closeRoom(input.roomCode);
+    if (!result.ok) throw new HttpError(409, result.error || 'Não foi possível fechar as entradas.');
     roomsUpdated();
     return { ok: true, state: getEngine(input.roomCode).getState() };
   });
-  fastify.post('/api/rooms/transfer', async (req) => {
-    const input = roomInput.extend({ moderatorId: z.string().uuid() }).parse(req.body);
-    await authorizeRoom(req.headers, input.roomCode);
-    if (!await database.findStaffUserById(input.moderatorId)) throw new HttpError(404, 'Operador não encontrado.');
-    const result = await roomManager.transferModeration(input.roomCode, input.moderatorId);
-    if (!result.ok) throw new HttpError(409, 'Não foi possível transferir a moderação.');
+  fastify.delete<{ Params: { code: string }; Querystring: { confirm?: string } }>('/api/rooms/:code', async (req) => {
+    await auth.requireUser(req.headers);
+    const code = roomCodeSchema.parse(req.params.code);
+    if (req.query.confirm !== code) throw new HttpError(400, 'Digite o código da sala para confirmar a exclusão de todos os seus dados.');
+    const result = await roomManager.deleteRoom(code);
+    if (!result.ok) throw new HttpError(result.status, result.error);
+    io.emit('room:deleted', { roomCode: code });
+    io.in(code).socketsLeave(code);
     roomsUpdated();
-    return result;
+    return { ok: true, rooms: roomManager.listRooms() };
   });
   fastify.get<{ Querystring: { room?: string; round?: string } }>('/api/rounds/validate', async (req) => {
     const input = roomQuery.extend({ round: z.string().max(180).optional() }).parse(req.query);
@@ -201,9 +202,11 @@ export async function createApplication() {
   fastify.post('/api/validate-nickname', async (req) => validateNickname(z.object({ nickname: z.string().max(200) }).parse(req.body).nickname));
 
   io.on('connection', (socket) => {
-    let currentRoom = 'MDX26';
-    socket.join(currentRoom);
-    socket.emit('room:state', getEngine(currentRoom).getState());
+    let currentRoom = roomManager.getRoom()?.getState().roomCode || '';
+    if (currentRoom) {
+      socket.join(currentRoom);
+      socket.emit('room:state', getEngine(currentRoom).getState());
+    }
     let windowAt = Date.now();
     let eventCount = 0;
     const on = <T extends z.ZodTypeAny>(event: string, schema: T, handler: (input: z.infer<T>) => unknown | Promise<unknown>) => {
@@ -223,15 +226,20 @@ export async function createApplication() {
       });
     };
     const targetInput = z.object({ roomCode: roomCodeSchema.optional() });
-    const targetCode = (code?: string) => roomCodeSchema.parse(code || currentRoom);
+    const targetCode = (code?: string) => {
+      if (!code && !currentRoom) throw new HttpError(404, 'Nenhuma sala disponível. Crie uma sala no painel.');
+      return roomCodeSchema.parse(code || currentRoom);
+    };
     const switchRoom = (code: string) => {
       const engine = getEngine(code);
       if (currentRoom !== code) {
-        getEngine(currentRoom).handleDisconnect(socket.id);
-        socket.leave(currentRoom);
+        if (currentRoom) {
+          roomManager.getRoom(currentRoom)?.handleDisconnect(socket.id);
+          socket.leave(currentRoom);
+        }
         currentRoom = code;
-        socket.join(code);
       }
+      socket.join(code);
       return engine;
     };
     on('room:join-session', targetInput, (input) => switchRoom(targetCode(input.roomCode)).getState());
@@ -241,6 +249,7 @@ export async function createApplication() {
       const code = targetCode(input.roomCode);
       const engine = switchRoom(code);
       const profile = await database.findPlayerByDeviceId(deviceId, code);
+      if (getEngine(code) !== engine) throw new HttpError(409, 'Esta sala foi substituída. Abra a sala novamente.');
       if (profile && engine.getState().players.some((p) => p.id === profile.id)) engine.joinRoom(profile, socket.id);
       return { ok: true, profile, state: engine.getState() };
     });
@@ -252,6 +261,7 @@ export async function createApplication() {
       if (!validation.valid) return { ok: false, error: validation.reason, suggestions: validation.suggestions };
       const profile = await database.upsertPlayer({ deviceId, nickname: validation.sanitized, avatar: input.avatar || 'menina-mdx', roomCode: code, isBot: false });
       await engine.refreshLeaderboards();
+      if (getEngine(code) !== engine) throw new HttpError(409, 'Esta sala foi substituída. Abra a sala novamente.');
       return { ok: true, profile };
     });
     on('player:join-room', targetInput.extend({ nickname: z.string().max(200).optional(), avatar: avatarSchema.optional(), roundToken: z.string().max(180).optional() }), async (input) => {
@@ -259,6 +269,7 @@ export async function createApplication() {
       const code = targetCode(input.roomCode);
       const engine = switchRoom(code);
       let profile = await database.findPlayerByDeviceId(deviceId, code);
+      if (getEngine(code) !== engine) throw new HttpError(409, 'Esta sala foi substituída. Abra a sala novamente.');
       const existing = profile && engine.getState().players.some((p) => p.id === profile!.id);
       if (!existing) {
         const validation = engine.validateRoundToken(input.roundToken);
@@ -269,6 +280,7 @@ export async function createApplication() {
         if (!validation.valid) return { ok: false, error: validation.reason, suggestions: validation.suggestions, state: engine.getState() };
         profile = await database.upsertPlayer({ deviceId, nickname: validation.sanitized, avatar: input.avatar || 'menina-mdx', roomCode: code, isBot: false });
       }
+      if (getEngine(code) !== engine) throw new HttpError(409, 'Esta sala foi substituída. Abra a sala novamente.');
       if (!profile) return { ok: false, error: 'Cadastre seu apelido nesta sala antes de jogar.', state: engine.getState() };
       const outcome = engine.joinRoom(profile, socket.id, input.roundToken);
       return { ok: outcome.joined, profile, slot: outcome.slot, error: outcome.reason, expired: outcome.expired, roundData: outcome.roundData, state: outcome.state };
@@ -314,7 +326,8 @@ export async function createApplication() {
     });
     on('moderator:close-room', roomInput, async (input) => {
       await authorizeRoom(socket.request.headers, input.roomCode);
-      await roomManager.closeRoom(input.roomCode);
+      const result = await roomManager.closeRoom(input.roomCode);
+      if (!result.ok) throw new HttpError(409, result.error || 'Não foi possível fechar as entradas.');
       roomsUpdated();
       return { ok: true, state: getEngine(input.roomCode).getState() };
     });
@@ -332,7 +345,7 @@ export async function createApplication() {
       await refreshRooms();
       return { ok: true };
     });
-    socket.on('disconnect', () => roomManager.getRoom(currentRoom)?.handleDisconnect(socket.id));
+    socket.on('disconnect', () => { if (currentRoom) roomManager.getRoom(currentRoom)?.handleDisconnect(socket.id); });
   });
 
   const publicPath = path.resolve('dist', 'public');

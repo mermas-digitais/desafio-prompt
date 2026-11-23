@@ -4,7 +4,7 @@ import { getSocket } from '../store/useGameStore';
 import { api } from '../lib/api';
 
 export interface RoomMetadata {
-  roomCode: string; roomName: string; moderatorId: string | null;
+  roomCode: string; roomName: string;
   isOpen: boolean; phase: string; playersCount: number; roundToken: string;
 }
 
@@ -26,6 +26,6 @@ export function useRoomAccess(roomCode: string) {
     const timer = setInterval(update, 10000);
     return () => { socket.off('rooms:updated', update); clearInterval(timer); };
   }, [refresh, refreshMe]);
-  const canManage = Boolean(user && !user.mustChangePassword && room?.roomCode === roomCode && (user.role === 'admin' || room.moderatorId === user.id));
+  const canManage = Boolean(user && !user.mustChangePassword && room?.roomCode === roomCode);
   return { user, room: room?.roomCode === roomCode ? room : null, canManage, refresh };
 }
