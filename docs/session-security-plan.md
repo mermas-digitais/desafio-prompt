@@ -48,6 +48,8 @@ IDs antigos eram públicos, portanto não são prova de posse. Novas sessões pr
 ## Exclusão de salas
 MDX26 e a última sala podem ser excluídas. Uma lista intencionalmente vazia permanece vazia após reiniciar; a sala inicial só é criada no primeiro bootstrap de administrador. Healthcheck, configuração, sockets e interface funcionam sem salas. Recriar o código inicia sem os perfis e partidas anteriores.
 
+A inicialização do esquema PostgreSQL também não insere salas. Um seed legado nesse caminho foi identificado no smoke de deploy e removido; `tests/postgres-startup.test.ts` cobre inicialização e reinício com o cliente PostgreSQL simulado, além dos testes de reinício local existentes.
+
 A exclusão é transacional em PostgreSQL; o armazenamento local restaura o estado em memória se a gravação falhar. Registro de participante usa bloqueio compartilhado da linha da sala, enquanto a exclusão usa bloqueio exclusivo: o registro termina antes da limpeza ou falha por sala inexistente. Avaliação, gravação de resultado e edição de sala em andamento impedem exclusão. O motor fica pausado durante a exclusão, volta se houver falha e é descartado no sucesso, sem timer ou broadcasts tardios.
 
 O evento público `room:deleted` informa somente o código, remove os sockets daquele canal e faz telão/celular conectados voltarem ao início. Clientes conectados limpam as chaves v2 de histórico local atribuíveis à sala; chaves legadas mistas não são apagadas por suposição. A exclusão no servidor **não apaga cópias de navegadores offline, imagens baixadas ou backups independentes**. Estes seguem sua própria retenção; restaurar um backup pode trazer dados antigos de volta.

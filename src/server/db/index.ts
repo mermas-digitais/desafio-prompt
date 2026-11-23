@@ -334,9 +334,6 @@ export class AppDatabase {
           ALTER TABLE rooms ADD COLUMN IF NOT EXISTS moderator_id UUID REFERENCES staff_users(id) ON DELETE SET NULL;
           CREATE INDEX IF NOT EXISTS idx_rooms_moderator ON rooms(moderator_id);
 
-          INSERT INTO rooms (code, name, is_open)
-          VALUES ('MDX26', 'Arena MDX Principal', true)
-          ON CONFLICT (code) DO NOTHING;
         `);
         await client.query('COMMIT');
       } catch (error) {
