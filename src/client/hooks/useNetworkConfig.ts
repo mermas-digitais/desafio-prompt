@@ -6,6 +6,7 @@ import { resolvePlatformPlayUrl } from '../helpers/networkHelpers';
 export function useNetworkConfig() {
   const roomCode = useGameStore((s) => s.roomState.roomCode);
   const roundToken = useGameStore((s) => s.roomState.roundToken);
+  const sessionId = useGameStore((s) => s.requestedSessionId);
   const netConfig = useTVUiStore((s) => s.netConfig);
   const updateNetConfig = useTVUiStore((s) => s.updateNetConfig);
 
@@ -39,10 +40,11 @@ export function useNetworkConfig() {
     () =>
       resolvePlatformPlayUrl({
         roomCode,
+        sessionId,
         roundToken,
         lanIp: netConfig.lanIp,
         publicAppUrl: netConfig.publicAppUrl,
       }),
-    [roomCode, roundToken, netConfig.lanIp, netConfig.publicAppUrl]
+    [roomCode, sessionId, roundToken, netConfig.lanIp, netConfig.publicAppUrl]
   );
 }

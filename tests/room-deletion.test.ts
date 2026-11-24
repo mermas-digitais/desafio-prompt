@@ -130,7 +130,10 @@ test('moderator deletes any room with exact confirmation; last-room deletion kee
     const health = await request('/api/health');
     assert.equal(health.status, 200);
     assert.equal(health.body.roomCode, 'B');
-    const joined = await observer.timeout(3000).emitWithAck('room:join-session', { roomCode: 'B' });
+    const sessionId = crypto.randomUUID();
+    const createdSession = await request('/api/sessions', mod.cookie, 'POST', { roomCode: 'B', id: sessionId, name: 'TV B' });
+    assert.equal(createdSession.status, 201);
+    const joined = await observer.timeout(3000).emitWithAck('room:join-session', { roomCode: 'B', sessionId });
     assert.equal(joined.roomCode, 'B');
     assert.equal((await request('/api/rooms/B?confirm=B', mod.cookie, 'DELETE')).status, 200);
     assert.deepEqual((await request('/api/rooms')).body.rooms, []);

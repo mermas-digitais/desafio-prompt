@@ -31,6 +31,21 @@ test('personal slot/evaluation use profile ID, never same nickname, old device I
   assert.equal(selectOwnPlayer(state, null), undefined);
 });
 
+test('same-room session switching rejects delayed state from the previous TV', () => {
+  const previous = useGameStore.getState();
+  const a = { ...DEFAULT_ROOM_STATE, roomCode: 'A', sessionId: 'tv-a' };
+  const b = { ...DEFAULT_ROOM_STATE, roomCode: 'A', sessionId: 'tv-b' };
+  try {
+    useGameStore.setState({ requestedRoomCode: 'A', requestedSessionId: 'tv-b', roomState: b });
+    useGameStore.getState().setRoomState(a);
+    assert.equal(useGameStore.getState().roomState, b);
+    assert.equal(isRequestedRoom(a, 'A', 'tv-b'), false);
+    const updated = { ...b, roomName: 'Updated' };
+    useGameStore.getState().setRoomState(updated);
+    assert.equal(useGameStore.getState().roomState, updated);
+  } finally { useGameStore.setState(previous); }
+});
+
 test('history isolates room and profile, deduplicates server round IDs and preserves legacy storage', () => {
   const storage = new Map<string, string>();
   const legacyKey = 'mdx26_personal_match_history_legacy';

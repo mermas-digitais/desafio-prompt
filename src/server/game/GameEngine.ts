@@ -79,7 +79,12 @@ export class GameEngine {
     io: SocketIOServer,
     roomCode = 'MDX26',
     roomName = 'Arena MDX Principal',
-    isOpen = true
+    isOpen = true,
+    public readonly sessionId = '',
+    public readonly sessionName = '',
+    private readonly nextRoomChallenge?: () => ChallengeSeedData,
+    private readonly onResult?: () => Promise<void>,
+    private readonly onMembersReleased?: (roundToken: string, profileId?: string) => void
   ) {
     this.io = io;
     this.roomCode = roomCode.toUpperCase().trim();
@@ -191,7 +196,7 @@ export class GameEngine {
     }
     for (const player of this.players) {
       if (player.socketId && !player.isBot) this.io.to(player.socketId).emit('player:kicked', {
-        roomCode: this.roomCode, roomName: this.roomName,
+        roomCode: this.roomCode, roomName: this.roomName, sessionId: this.sessionId,
         reason: 'Partida cancelada pela organização. Escaneie o novo QR do telão para jogar novamente.',
       });
     }
@@ -212,9 +217,11 @@ export class GameEngine {
     if (idx === -1) return { kicked: false };
 
     const removed = this.players.splice(idx, 1)[0];
+    this.onMembersReleased?.(this.roundToken, removed.id);
     this.blockedProfiles.add(removed.id);
     if (removed.socketId) {
       this.io.to(removed.socketId).emit('player:kicked', {
+        sessionId: this.sessionId,
         reason,
         roomCode: this.roomCode,
         roomName: this.roomName,
@@ -283,6 +290,10 @@ export class GameEngine {
   }
 
   private pickNextChallenge(): ChallengeSeedData {
+    if (this.nextRoomChallenge) {
+      this.currentChallenge = this.nextRoomChallenge();
+      return this.currentChallenge;
+    }
     if (this.challengeDeck.length === 0) {
       this.refillAndShuffleDeck();
     }
@@ -369,6 +380,8 @@ export class GameEngine {
       roomCode: this.roomCode,
       roomName: this.roomName,
       isOpen: this.isOpen,
+      sessionId: this.sessionId,
+      sessionName: this.sessionName,
       roundId: this.roundId,
       roundToken: this.roundToken,
       phase: this.phase,
@@ -389,13 +402,20 @@ export class GameEngine {
   public broadcastState(): void {
     if (this.disposed) return;
     const state = this.getState();
-    this.io.to(this.roomCode).emit('room:state', state);
+    this.io.to(this.sessionId ? `session:${this.sessionId}` : this.roomCode).emit('room:state', state);
   }
 
   public async refreshLeaderboards(): Promise<LeaderboardsPayload> {
     this.leaderboards = await database.getLeaderboards(100, this.roomCode);
     this.broadcastState();
     return this.leaderboards;
+  }
+
+  public renameRoom(name: string): void { this.roomName = name; this.broadcastState(); }
+
+  public setLeaderboards(leaderboards: LeaderboardsPayload): void {
+    this.leaderboards = leaderboards;
+    this.broadcastState();
   }
 
   public joinRoom(
@@ -513,7 +533,8 @@ export class GameEngine {
     if (idx === -1) return;
 
     if (this.phase === 'IDLE' || this.phase === 'LOBBY') {
-      this.players.splice(idx, 1);
+      const [removed] = this.players.splice(idx, 1);
+      this.onMembersReleased?.(this.roundToken, removed.id);
       const remainingHumans = this.players.filter((p) => !p.isBot);
       if (remainingHumans.length === 0) {
         this.phase = 'IDLE';
@@ -741,6 +762,7 @@ export class GameEngine {
       this.committingRounds += 1;
       committing = true;
       const committedEvaluations = await database.commitRound({
+        sessionId: this.sessionId || undefined,
         roomCode: this.roomCode,
         roundId,
         roundToken,
@@ -843,6 +865,8 @@ export class GameEngine {
       if (!isCurrent()) return;
       this.evaluations = committedEvaluations;
       this.leaderboards = leaderboards;
+      await this.onResult?.();
+      if (!isCurrent()) return;
 
       // Entra na fase REVEALING (1 por 1, ritmo ágil: 4s por participante para manter dinamismo na TV)
       this.phase = 'REVEALING';
@@ -860,6 +884,7 @@ export class GameEngine {
   }
 
   public resetToIdle(): void {
+    const previousToken = this.roundToken;
     this.archiveCurrentRound();
     this.generateNewRoundToken();
     this.phase = 'IDLE';
@@ -875,6 +900,7 @@ export class GameEngine {
     this.botSchedules = [];
     this.isEvaluating = false;
     this.currentChallenge = null;
+    this.onMembersReleased?.(previousToken);
     this.broadcastState();
   }
 

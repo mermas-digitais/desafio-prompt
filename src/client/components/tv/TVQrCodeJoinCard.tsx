@@ -14,6 +14,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
     const playersCount = useGameStore((s) => s.roomState.players.length);
     const roomCode = useGameStore((s) => s.roomState.roomCode);
     const roomName = useGameStore((s) => s.roomState.roomName);
+    const sessionName = useGameStore((s) => s.roomState.sessionName);
     const isOpen = useGameStore((s) => s.roomState.isOpen);
 
     if (!isOpen) {
@@ -22,7 +23,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
           <div className="w-full flex items-center justify-between gap-2 shrink-0">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
               <Lock className="w-3.5 h-3.5 text-amber-600" />
-              <span>Sala Fechada</span>
+              <span>Entradas pausadas</span>
             </span>
             <span className="text-xs font-mono font-bold text-[#6E4F7D]">
               Sala: {roomCode || 'MDX26'}
@@ -38,7 +39,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
                 Aguardando Abertura
               </h2>
               <p className="text-xs text-[#545454] max-w-[260px] mx-auto mt-1 leading-relaxed">
-                O moderador desta TV precisa declarar a sala aberta para liberar o QR Code exclusivo da rodada.
+                A organização pausou novas entradas nesta sessão. Outras sessões da sala não são afetadas.
               </p>
             </div>
 
@@ -50,13 +51,13 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
                 className="mt-2 py-3 px-5 rounded-2xl bg-gradient-to-r from-[#9747FF] to-[#D01F6B] hover:opacity-95 text-white font-display text-xs lg:text-sm flex items-center gap-2 shadow-sm cursor-pointer transition-all"
               >
                 <DoorOpen className="w-4 h-4" />
-                <span>Abrir Sala da TV (Moderador)</span>
+                <span>Gerenciar entradas desta sessão</span>
               </button>
             )}
           </div>
 
           <div className="w-full pt-3 border-t border-[#F3E8FF] text-[11px] text-[#6E4F7D]">
-            Sessão Atual: <strong>{roomName || 'Aguardando Início'}</strong>
+            Sessão: <strong>{sessionName || 'Aguardando início'}</strong> · {roomName}
           </div>
         </div>
       );
@@ -68,12 +69,12 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
         <div className="w-full flex items-center justify-between gap-2 shrink-0">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FAF5FF] border border-[#DDC7F8] text-[11px] font-bold text-[#9747FF] whitespace-nowrap">
             <Sparkles className="w-3 h-3 text-[#FF4A97]" />
-            <span>{roomName || 'Entrada pelo Celular'}</span>
+            <span className="whitespace-normal break-words">{sessionName || 'Entrada pelo celular'}</span>
           </span>
 
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 whitespace-nowrap">
             <Users className="w-3 h-3 text-emerald-600" />
-            <span>{playersCount}/5 na sala</span>
+            <span>{playersCount}/5 nesta sessão</span>
           </span>
         </div>
 
@@ -90,7 +91,7 @@ export const TVQrCodeJoinCard: React.FC<TVQrCodeJoinCardProps> = React.memo(
               Escaneie para Jogar
             </h2>
             <p className="text-xs text-[#6E4F7D] font-medium">
-              QR Code exclusivo desta rodada na {roomName || 'Arena MDX'}
+              Você entrará em {sessionName || 'esta sessão'} · {roomName || roomCode}
             </p>
           </div>
         </div>

@@ -48,6 +48,7 @@ export const matches = pgTable('matches', {
   challengeId: varchar('challenge_id', { length: 64 }).notNull(),
   roundId: text('round_id'),
   roundToken: text('round_token'),
+  sessionId: uuid('session_id'),
   winnerPlayerId: uuid('winner_player_id'),
   resultsJson: text('results_json').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -87,6 +88,23 @@ export const rooms = pgTable('rooms', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => [index('idx_rooms_moderator').on(table.moderatorId)]);
+
+export const gameSessions = pgTable('game_sessions', {
+  id: uuid('id').primaryKey(),
+  roomCode: varchar('room_code', { length: 32 }).notNull().references(() => rooms.code, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 80 }).notNull(),
+  status: text('status').$type<'active' | 'ended' | 'interrupted'>().notNull().default('active'),
+  createdBy: uuid('created_by').references(() => staffUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [index('idx_game_sessions_room').on(table.roomCode)]);
+
+export const activeParticipations = pgTable('active_participations', {
+  id: uuid('id').notNull().unique(),
+  deviceId: varchar('device_id', { length: 128 }).primaryKey(),
+  profileId: uuid('profile_id').notNull().unique().references(() => players.id, { onDelete: 'cascade' }),
+  sessionId: uuid('session_id').notNull().references(() => gameSessions.id, { onDelete: 'cascade' }),
+  roundToken: text('round_token').notNull(),
+});
 
 export type PlayerRow = typeof players.$inferSelect;
 export type NewPlayerRow = typeof players.$inferInsert;

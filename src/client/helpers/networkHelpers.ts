@@ -51,6 +51,7 @@ export function getProductionPublicUrl(): string {
 
 export function resolvePlatformPlayUrl(params: {
   roomCode: string;
+  sessionId?: string;
   roundToken?: string;
   lanIp: string;
   publicAppUrl: string;
@@ -59,7 +60,7 @@ export function resolvePlatformPlayUrl(params: {
   playDisplayUrl: string;
 } {
   const roomCode = params.roomCode || 'MDX26';
-  const roundParam = params.roundToken ? `&round=${encodeURIComponent(params.roundToken)}` : '';
+  const roundParam = `${params.sessionId ? `&session=${encodeURIComponent(params.sessionId)}` : ''}${params.roundToken ? `&round=${encodeURIComponent(params.roundToken)}` : ''}`;
   const isProdBuild =
     typeof __IS_PRODUCTION_BUILD__ === 'boolean' ? __IS_PRODUCTION_BUILD__ : false;
   const backendPub = (params.publicAppUrl || '').trim().replace(/\/+$/, '');

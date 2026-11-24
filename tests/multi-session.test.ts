@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { once } from 'node:events';
+import { io, type Socket } from 'socket.io-client';
+
+test('independent TV sessions share room careers, reject simultaneous play and keep viewers read-only', { timeout: 60000 }, async () => {
+  const cwd = process.cwd();
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'multi-session-'));
+  Object.assign(process.env, { NODE_ENV: 'test', DATABASE_URL: '', OPENAI_API_KEY: '', GROQ_API_KEY: '', SESSION_SECRET: crypto.randomBytes(32).toString('hex'), BOOTSTRAP_ADMIN_EMAIL: 'admin@example.test', BOOTSTRAP_ADMIN_PASSWORD: 'initial-test-password' });
+  process.chdir(temp);
+  const { createApplication } = await import('../src/server/index.js');
+  const { OFFICIAL_CHALLENGES } = await import('../src/server/db/challengesData.js');
+  const app = await createApplication();
+  const sockets: Socket[] = [];
+  try {
+    await app.fastify.listen({ host: '127.0.0.1', port: 0 });
+    const base = `http://127.0.0.1:${(app.fastify.server.address() as { port: number }).port}`;
+    const request = async (route: string, cookie = '', body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
+      const response = await fetch(base + route, { method, headers: { Cookie: cookie, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      return { status: response.status, cookie: response.headers.get('set-cookie')?.split(';')[0] || '', body: await response.json() as any };
+    };
+    const connect = async (cookie = '') => { const socket = io(base, { transports: ['websocket'], extraHeaders: { Cookie: cookie }, reconnection: false }); sockets.push(socket); await once(socket, 'connect'); return socket; };
+    const ack = (socket: Socket, event: string, payload: unknown) => socket.timeout(3000).emitWithAck(event, payload) as Promise<any>;
+    assert.deepEqual((await request('/api/sessions?room=MDX26')).body.sessions, []);
+    await request('/api/state?room=MDX26');
+    const viewer = await connect();
+    await ack(viewer, 'room:watch', { roomCode: 'MDX26' });
+    assert.equal(app.roomManager.listSessions().length, 0, 'visitors never create engines');
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const create = (id: string, cookie = '', roomCode = 'MDX26', name = 'TV ' + id.slice(0, 4)) => request('/api/sessions', cookie, { id, roomCode, name });
+    assert.equal((await create(ids[0])).status, 401);
+    const login = await request('/api/auth/login', '', { email: 'admin@example.test', password: 'initial-test-password' });
+    assert.equal((await create(ids[0], login.cookie)).status, 409);
+    const admin = await request('/api/auth/password', login.cookie, { currentPassword: 'initial-test-password', newPassword: 'new-test-password-123' });
+    await request('/api/users', admin.cookie, { name: 'Moderator', email: 'mod@example.test', password: 'initial-test-password' });
+    const initialMod = await request('/api/auth/login', '', { email: 'mod@example.test', password: 'initial-test-password' });
+    const mod = await request('/api/auth/password', initialMod.cookie, { currentPassword: 'initial-test-password', newPassword: 'new-test-password-123' });
+    const a = await create(ids[0], mod.cookie), b = await create(ids[1], mod.cookie);
+    assert.equal(a.status, 201); assert.equal(b.status, 201);
+    assert.equal((await create(ids[0], mod.cookie)).body.state.sessionId, ids[0], 'retry is idempotent');
+    assert.equal((await create(ids[2], mod.cookie)).status, 409);
+    assert.equal((await request('/api/state?room=MDX26')).status, 404, 'ambiguous room cannot pick a session');
+    const observerA = await connect(), observerB = await connect();
+    await ack(observerA, 'room:join-session', { roomCode: 'MDX26', sessionId: ids[0] });
+    await ack(observerB, 'room:join-session', { roomCode: 'MDX26', sessionId: ids[1] });
+    let changesB = 0;
+    observerB.on('room:state', () => changesB++);
+    const privateSession = await request('/api/player/session', '', {});
+    const player = await connect(privateSession.cookie);
+    const targetA = { roomCode: 'MDX26', sessionId: ids[0] }, targetB = { roomCode: 'MDX26', sessionId: ids[1] };
+    const registered = await ack(player, 'player:register', { ...targetA, nickname: 'Primeira', avatar: 'ia' });
+    assert.equal(registered.ok, true);
+    const changedA = once(observerA, 'room:state');
+    assert.equal((await ack(player, 'player:join-room', { ...targetA, roundToken: a.body.state.roundToken })).ok, true);
+    assert.equal((await changedA)[0].sessionId, ids[0]);
+    assert.equal(changesB, 0);
+    assert.equal((await ack(player, 'player:join-room', { ...targetB, roundToken: b.body.state.roundToken })).ok, false);
+    assert.equal((await ack(player, 'player:identify', targetB)).profile.id, registered.profile.id, 'same career in both sessions');
+    const staff = await connect(mod.cookie);
+    assert.equal((await ack(viewer, 'room:cancel-lobby', { ...targetA, roundToken: a.body.state.roundToken })).ok, false);
+    assert.equal((await ack(staff, 'room:cancel-lobby', { ...targetB, roundToken: a.body.state.roundToken })).ok, false);
+    const stateB = app.roomManager.getRoom('MDX26', ids[1])!.getState();
+    assert.equal((await request('/api/rooms/close', mod.cookie, targetA)).status, 200);
+    assert.equal(app.roomManager.getRoom('MDX26', ids[1])!.getState().isOpen, true);
+    await request('/api/rooms/open', mod.cookie, targetA);
+    assert.equal((await ack(staff, 'room:cancel-lobby', { ...targetA, roundToken: a.body.state.roundToken })).ok, true);
+    assert.equal(app.roomManager.getRoom('MDX26', ids[1])!.getState().roundToken, stateB.roundToken);
+    assert.equal((await ack(player, 'player:join-room', { ...targetB, roundToken: stateB.roundToken })).ok, true, 'cancel releases global claim');
+    assert.equal((await ack(player, 'player:join-room', { ...targetB, roundToken: stateB.roundToken })).ok, true, 'reconnection does not add a slot');
+    assert.equal(app.roomManager.getRoom('MDX26', ids[1])!.getState().players.length, 1);
+
+    await request('/api/rooms/create', mod.cookie, { roomCode: 'OTHER', name: 'Other room' });
+    assert.equal((await create(ids[2], mod.cookie, 'OTHER')).status, 201);
+    const targetC = { roomCode: 'OTHER', sessionId: ids[2] };
+    const tokenC = app.roomManager.getRoom('OTHER', ids[2])!.getState().roundToken;
+    await ack(player, 'player:register', { ...targetC, nickname: 'OutroPerfil', avatar: 'ia' });
+    assert.equal((await ack(player, 'player:join-room', { ...targetC, roundToken: tokenC })).ok, false, 'exclusivity crosses rooms');
+    const secondIdentity = await request('/api/player/session', '', {});
+    const second = await connect(secondIdentity.cookie), secondTab = await connect(secondIdentity.cookie);
+    const secondProfile = await ack(second, 'player:register', { ...targetA, nickname: 'Segunda', avatar: 'ia' });
+    await ack(second, 'player:register', { ...targetC, nickname: 'SegundaOutra', avatar: 'ia' });
+    const tokenA = app.roomManager.getRoom('MDX26', ids[0])!.getState().roundToken;
+    const concurrent = await Promise.all([ack(second, 'player:join-room', { ...targetA, roundToken: tokenA }), ack(secondTab, 'player:join-room', { ...targetC, roundToken: tokenC })]);
+    assert.equal(concurrent.filter((result) => result.ok).length, 1);
+    if (!concurrent[0].ok) { await ack(second, 'player:leave-room', targetC); assert.equal((await ack(second, 'player:join-room', { ...targetA, roundToken: tokenA })).ok, true); }
+    const engineA = app.roomManager.getRoom('MDX26', ids[0])!, engineB = app.roomManager.getRoom('MDX26', ids[1])!;
+    engineA.fillBotsAndStartNow(); engineB.fillBotsAndStartNow();
+    assert.notEqual(engineA.getState().challenge!.id, engineB.getState().challenge!.id, 'parallel TVs never reveal the same image');
+    for (const [engine, deviceId] of [[engineA, secondProfile.profile.deviceId], [engineB, registered.profile.deviceId]] as const) {
+      (engine as any).startPlaying(); engine.pause();
+      const challenge = OFFICIAL_CHALLENGES.find((entry) => entry.id === engine.getState().challenge!.id)!;
+      engine.submitPlayerPrompt(deviceId, challenge.fullPrompt);
+    }
+    await Promise.all([(engineA as any).transitionToEvaluating(), (engineB as any).transitionToEvaluating()]);
+    const ranking = (await request('/api/leaderboards?room=MDX26')).body;
+    assert.equal(ranking.stats.totalMatches, 2);
+    assert.ok(ranking.general.some((entry: any) => entry.playerId === registered.profile.id && entry.totalScore > 0));
+    assert.deepEqual(engineA.getState().leaderboards, engineB.getState().leaderboards);
+    const { database } = await import('../src/server/db/index.js');
+    assert.equal((await database.getRoundSummary('MDX26', engineA.getState().roundToken, 'Main'))?.sessionId, ids[0]);
+    const beforeEnd = engineB.getState().roundToken;
+    assert.equal((await request(`/api/sessions/${ids[0]}?room=MDX26&confirm=true`, '', undefined, 'DELETE')).status, 401);
+    assert.equal((await request(`/api/sessions/${ids[0]}?room=MDX26&confirm=true`, mod.cookie, undefined, 'DELETE')).status, 200);
+    assert.equal(engineB.getState().roundToken, beforeEnd);
+    assert.equal((await create(ids[0], mod.cookie)).status, 409, 'ended identifiers cannot recreate engines');
+    assert.equal((await request('/api/leaderboards?room=MDX26')).body.stats.totalMatches, 2);
+    assert.equal((await database.findPlayerByDeviceId(registered.profile.deviceId, 'MDX26'))?.id, registered.profile.id);
+  } finally {
+    sockets.forEach((socket) => socket.disconnect()); await app.close(); process.chdir(cwd); fs.rmSync(temp, { recursive: true, force: true });
+  }
+});

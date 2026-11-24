@@ -10,6 +10,7 @@ import { TVScreen } from './pages/TVScreen';
 import { PlayScreen } from './pages/PlayScreen';
 import { AdminScreen } from './pages/AdminScreen';
 import { TopLoadingBar } from './components/TopLoadingBar';
+import { parseTVMode, safeControlReturnTo, type TVMode } from './lib/sessionNavigation';
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -29,8 +30,11 @@ const indexRoute = createRoute({
 const tvRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tv',
-  validateSearch: (search: Record<string, unknown>): { room?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { room?: string; session?: string; mode?: TVMode; ended?: boolean } => ({
     room: typeof search.room === 'string' ? search.room : 'MDX26',
+    session: typeof search.session === 'string' ? search.session : undefined,
+    mode: parseTVMode(search.mode),
+    ended: search.ended === true || search.ended === 'true' || undefined,
   }),
   component: TVScreen,
 });
@@ -38,9 +42,10 @@ const tvRoute = createRoute({
 const playRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/play',
-  validateSearch: (search: Record<string, unknown>): { room?: string; round?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { room?: string; round?: string; session?: string } => ({
     room: typeof search.room === 'string' ? search.room : 'MDX26',
     round: typeof search.round === 'string' ? search.round : undefined,
+    session: typeof search.session === 'string' ? search.session : undefined,
   }),
   component: PlayScreen,
 });
@@ -48,6 +53,7 @@ const playRoute = createRoute({
 const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
+  validateSearch: (search: Record<string, unknown>): { returnTo?: string } => ({ returnTo: safeControlReturnTo(search.returnTo) }),
   component: AdminScreen,
 });
 

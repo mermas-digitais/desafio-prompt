@@ -1,7 +1,7 @@
 import type { GameRoomState, PlayerProfile } from '../../shared/types';
 
-export function isRequestedRoom(state: GameRoomState | null | undefined, requestedRoomCode: string): state is GameRoomState {
-  return Boolean(state?.phase && state.roomCode === requestedRoomCode);
+export function isRequestedRoom(state: GameRoomState | null | undefined, requestedRoomCode: string, sessionId?: string): state is GameRoomState {
+  return Boolean(state?.phase && state.roomCode === requestedRoomCode && (sessionId === undefined || (state.sessionId || '') === sessionId));
 }
 
 export function selectOwnPlayer(state: GameRoomState, profile: PlayerProfile | null) {

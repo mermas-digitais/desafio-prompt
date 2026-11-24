@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useSearch } from '@tanstack/react-router';
+import { safeControlReturnTo } from '../lib/sessionNavigation';
 import { ArrowLeft, ArrowRight, KeyRound, LogOut, Plus, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 import type { StaffUser } from '../../shared/types';
 import { useAuthStore } from '../store/useAuthStore';
@@ -16,6 +17,8 @@ const field = 'mermas-input org-field';
 const button = 'org-button';
 
 export const AdminScreen: React.FC = () => {
+  const search = useSearch({ strict: false }) as { returnTo?: string };
+  const returnTo = safeControlReturnTo(search.returnTo);
   const { user, loaded, refresh, login, logout, changePassword } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -58,6 +61,9 @@ export const AdminScreen: React.FC = () => {
     } finally { if (scopeRef.current === target) setRankingLoading(false); }
   };
   useEffect(() => { void refresh().catch(() => setError('Não foi possível verificar sua sessão. Recarregue a página.')); }, [refresh]);
+  useEffect(() => {
+    if (loaded && user && !user.mustChangePassword && returnTo) window.location.replace(returnTo);
+  }, [loaded, user, returnTo]);
   useEffect(() => {
     setPlayers([]); setUsers([]); setRooms([]); setScope('');
     setSection(user?.mustChangePassword ? 'account' : user?.role === 'admin' ? 'team' : 'ranking');
@@ -107,7 +113,7 @@ export const AdminScreen: React.FC = () => {
           <Link to="/" className={`${button} org-button-quiet !px-0`}>Só quero assistir aos telões <ArrowRight size={16} aria-hidden="true" /></Link>
         </section>
         <section className="mermas-card p-6 sm:p-8 space-y-6">
-          <div><h2 className="font-display text-2xl">Acesso da organização</h2><p className="org-description mt-2">Use a conta fornecida pela administração.</p></div>
+          <div><h2 className="font-display text-2xl">Acesso da organização</h2><p className="org-description mt-2">{returnTo ? 'Entre para voltar ao controle da sessão escolhida.' : 'Use a conta fornecida pela administração.'}</p></div>
           {error && <p role="alert" className="org-notice org-notice-error">{error}</p>}
           <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); if (!busy) void run(async () => { await login(email.trim(), password); setPassword(''); }); }}>
             <label className="org-label">E-mail<input className={field} type="email" required autoComplete="username" placeholder="voce@exemplo.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label>

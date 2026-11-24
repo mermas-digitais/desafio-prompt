@@ -20,9 +20,20 @@ test('all staff control all rooms while account management and global maintenanc
     await app.fastify.listen({ host: '127.0.0.1', port: 0 });
     const address = app.fastify.server.address() as { port: number };
     const base = `http://127.0.0.1:${address.port}`;
+    const sessions = new Map<string, string>();
     const request = async (route: string, body?: unknown, cookie = '', method = body === undefined ? 'GET' : 'POST') => {
+      // These legacy scenarios explicitly provision one authenticated session per fixture room.
+      const input = body as { roomCode?: string } | undefined;
+      if (input?.roomCode && sessions.has(input.roomCode)) body = { ...input, sessionId: sessions.get(input.roomCode) };
+      if (route.startsWith('/api/state?room=')) { const code = new URL(base + route).searchParams.get('room')!; if (sessions.has(code)) route += `&session=${sessions.get(code)}`; }
       const response = await fetch(base + route, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
-      return { status: response.status, cookie: response.headers.get('set-cookie')?.split(';')[0] || '', body: await response.json() as any };
+      const result = { status: response.status, cookie: response.headers.get('set-cookie')?.split(';')[0] || '', body: await response.json() as any };
+      if (route === '/api/rooms/create' && response.status === 201) {
+        const id = crypto.randomUUID();
+        const session = await request('/api/sessions', { roomCode: input!.roomCode, id, name: 'Fixture TV' }, cookie);
+        assert.equal(session.status, 201); sessions.set(input!.roomCode!, id);
+      }
+      return result;
     };
     const connect = async (cookie = '') => {
       const socket = clientSocket(base, { transports: ['websocket'], extraHeaders: { Cookie: cookie }, reconnection: false });
@@ -30,7 +41,7 @@ test('all staff control all rooms while account management and global maintenanc
       await once(socket, 'connect');
       return socket;
     };
-    const ack = (socket: Socket, event: string, payload: unknown) => socket.timeout(3000).emitWithAck(event, payload) as Promise<any>;
+    const ack = (socket: Socket, event: string, payload: any) => socket.timeout(3000).emitWithAck(event, { ...payload, sessionId: sessions.get(payload.roomCode) }) as Promise<any>;
 
     assert.equal((await request('/api/rooms/create', { roomCode: 'BLOCKED', name: 'Blocked' })).status, 401);
     const login = await request('/api/auth/login', { email: 'admin@example.test', password: adminPassword });
@@ -43,6 +54,9 @@ test('all staff control all rooms while account management and global maintenanc
     const changed = await request('/api/auth/password', { currentPassword: adminPassword, newPassword: 'new-test-password-123' }, login.cookie);
     assert.equal(changed.status, 200);
     const adminCookie = changed.cookie;
+    const defaultId = crypto.randomUUID();
+    assert.equal((await request('/api/sessions', { roomCode: 'MDX26', id: defaultId, name: 'Main fixture TV' }, adminCookie)).status, 201);
+    sessions.set('MDX26', defaultId);
     assert.equal((await request('/api/auth/me', undefined, login.cookie)).body.user, null);
 
     const moderatorCookies: string[] = [];

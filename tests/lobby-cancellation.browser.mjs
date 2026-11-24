@@ -12,19 +12,22 @@ async (page) => {
   const created = await page.evaluate(async () => {
     const response = await fetch('/api/rooms/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode: 'LOBBYQA', name: 'Lobby de teste' }) });
     if (!response.ok) throw new Error('Restart the isolated fixture before repeating this test');
-    return response.json();
+    const session = await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode: 'LOBBYQA', id: crypto.randomUUID(), name: 'TV teste' }) });
+    if (!session.ok) throw new Error('Could not create fixture session');
+    return session.json();
   });
   const token = created.state.roundToken;
   const context = await page.context().browser().newContext({ viewport: { width: 390, height: 844 } });
   const participant = await context.newPage();
   try {
-    await participant.goto(`${base}/play?room=LOBBYQA&round=${encodeURIComponent(token)}`);
+    await participant.goto(`${base}/play?room=LOBBYQA&session=${created.state.sessionId}&round=${encodeURIComponent(token)}`);
     await participant.getByPlaceholder('Ex: Mermã Cyber, AdaTech...').fill('Lobby Teste');
     await participant.getByRole('button', { name: 'Salvar e Entrar na Rodada', exact: true }).click();
     await page.waitForFunction(async () => (await (await fetch('/api/state?room=LOBBYQA')).json()).phase === 'LOBBY');
-    await page.goto(`${base}/tv?room=LOBBYQA`);
-    await page.getByRole('button', { name: 'Cancelar partida…', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Confirmar ação · LOBBYQA', exact: true });
+    await page.goto(`${base}/tv?room=LOBBYQA&session=${created.state.sessionId}&mode=control`);
+    await page.getByRole('button', { name: 'Abrir moderação da sala LOBBYQA', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancelar partida…', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: /Moderação · .+ · LOBBYQA/ });
     await dialog.waitFor();
     for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 667 }]) {
       await page.setViewportSize(viewport);

@@ -49,6 +49,7 @@ export function ensurePlayerSession(): Promise<string> {
 interface GameStoreState {
   roomState: GameRoomState;
   requestedRoomCode: string;
+  requestedSessionId: string;
   isConnected: boolean;
   isSyncing: boolean;
   kickedReason: string | null;
@@ -58,7 +59,7 @@ interface GameStoreState {
   setIsSyncing: (value: boolean) => void;
   setKickedReason: (value: string | null) => void;
   initSocketConnection: () => void;
-  joinSessionRoom: (roomCode: string) => void;
+  joinSessionRoom: (roomCode: string, sessionId?: string) => void;
   openRoom: (params: { roomCode: string; name: string }) => Promise<CommandResponse>;
   closeRoom: (params: { roomCode: string }) => Promise<CommandResponse>;
   kickPlayer: (params: { roomCode?: string; playerId: string; slot?: PlayerSlot; reason?: string }) => Promise<CommandResponse>;
@@ -76,22 +77,24 @@ interface GameStoreState {
 
 async function command<T extends CommandResponse>(event: string, payload: object): Promise<T> {
   const store = useGameStore.getState();
+  const roomCode = store.requestedRoomCode;
+  const sessionId = store.requestedSessionId;
   store.initSocketConnection();
   store.setIsSyncing(true);
   return new Promise((resolve) => {
-    getSocket().timeout(10000).emit(event, payload, (error: Error | null, response?: T) => {
+    getSocket().timeout(10000).emit(event, { ...payload, sessionId }, (error: Error | null, response?: T) => {
       store.setIsSyncing(false);
       const result = error || !response ? { ok: false, error: 'Servidor não respondeu. Confira a conexão e atualize antes de repetir a ação.' } as T : response;
-      if (result.state) useGameStore.getState().setRoomState(result.state);
+      if (result.state && useGameStore.getState().requestedSessionId === sessionId && useGameStore.getState().requestedRoomCode === roomCode) useGameStore.getState().setRoomState(result.state);
       resolve(result);
     });
   });
 }
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
-  roomState: DEFAULT_ROOM_STATE, requestedRoomCode: 'MDX26', isConnected: false,
+  roomState: DEFAULT_ROOM_STATE, requestedRoomCode: 'MDX26', requestedSessionId: '', isConnected: false,
   isSyncing: false, kickedReason: null, connectionError: null,
-  setRoomState: (state) => { if (isRequestedRoom(state, get().requestedRoomCode)) set({ roomState: state }); },
+  setRoomState: (state) => { if (isRequestedRoom(state, get().requestedRoomCode, get().requestedSessionId)) set({ roomState: state }); },
   setIsConnected: (isConnected) => set({ isConnected }),
   setIsSyncing: (isSyncing) => set({ isSyncing }),
   setKickedReason: (kickedReason) => set({ kickedReason }),
@@ -102,30 +105,39 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       socketBoundToStore = true;
       socket.on('connect', () => {
         set({ isConnected: true, connectionError: null });
-        get().joinSessionRoom(get().requestedRoomCode);
+        get().joinSessionRoom(get().requestedRoomCode, get().requestedSessionId);
       });
       socket.on('disconnect', () => set({ isConnected: false }));
       socket.on('connect_error', () => set({ connectionError: 'Sem conexão com a sala. Tentando reconectar…' }));
       socket.on('operation:error', (response: { error?: string }) => set({ connectionError: response.error || 'Ação recusada. Atualize a sala.' }));
       socket.on('room:state', (state: GameRoomState) => get().setRoomState(state));
+      socket.on('room:leaderboards', (payload: { roomCode: string; leaderboards: GameRoomState['leaderboards'] }) => {
+        if (payload.roomCode === get().requestedRoomCode) set({ roomState: { ...get().roomState, leaderboards: payload.leaderboards } });
+      });
+      socket.on('session:ended', (payload: { roomCode: string; sessionId: string }) => {
+        if (payload.sessionId !== get().requestedSessionId) return;
+        set({ requestedSessionId: '', roomState: { ...DEFAULT_ROOM_STATE, roomCode: payload.roomCode }, connectionError: 'Esta sessão foi encerrada.' });
+        if (window.location.pathname === '/tv' || window.location.pathname === '/play') window.location.assign(`/tv?room=${encodeURIComponent(payload.roomCode)}&ended=true`);
+      });
       socket.on('room:deleted', (payload: { roomCode: string }) => {
         clearRoomMatchHistory(payload.roomCode);
         if (payload.roomCode !== get().requestedRoomCode) return;
         set({ roomState: { ...DEFAULT_ROOM_STATE, roomCode: payload.roomCode }, kickedReason: null, connectionError: 'Esta sala foi excluída pela organização.' });
         if (window.location.pathname === '/tv' || window.location.pathname === '/play') window.location.assign('/');
       });
-      socket.on('player:kicked', (payload: { reason?: string; roomCode?: string }) => {
-        if (!payload.roomCode || payload.roomCode === get().requestedRoomCode) set({ kickedReason: payload.reason || 'Você foi removida desta rodada.' });
+      socket.on('player:kicked', (payload: { reason?: string; roomCode?: string; sessionId?: string }) => {
+        if (payload.roomCode === get().requestedRoomCode && payload.sessionId === get().requestedSessionId) set({ kickedReason: payload.reason || 'Você foi removida desta rodada.' });
       });
     }
     if (!socket.connected) socket.connect();
   },
-  joinSessionRoom: (roomCode) => {
+  joinSessionRoom: (roomCode, sessionId = '') => {
     const clean = roomCode.toUpperCase().trim();
-    if (clean !== get().requestedRoomCode) set({ requestedRoomCode: clean, roomState: { ...DEFAULT_ROOM_STATE, roomCode: clean, roomName: clean }, kickedReason: null });
+    if (clean !== get().requestedRoomCode || sessionId !== get().requestedSessionId) set({ requestedRoomCode: clean, requestedSessionId: sessionId, roomState: { ...DEFAULT_ROOM_STATE, roomCode: clean, roomName: clean }, kickedReason: null, connectionError: null });
     get().initSocketConnection();
-    getSocket().timeout(10000).emit('room:join-session', { roomCode: clean }, (error: Error | null, state?: GameRoomState & { error?: string }) => {
-      if (get().requestedRoomCode !== clean) return;
+    if (!sessionId) { getSocket().emit('room:watch', { roomCode: clean }); return; }
+    getSocket().timeout(10000).emit('room:join-session', { roomCode: clean, sessionId }, (error: Error | null, state?: GameRoomState & { error?: string }) => {
+      if (get().requestedRoomCode !== clean || get().requestedSessionId !== sessionId) return;
       if (error) set({ connectionError: 'Sala não respondeu. Confira o código e tente recarregar.' });
       else if (state?.error) set({ connectionError: state.error });
       else if (state) { get().setRoomState(state); set({ connectionError: null }); }
@@ -150,7 +162,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   sendTypingDraft: (_deviceId, draftPrompt, roomCode) => {
     const socket = getSocket();
     if (!socket.connected) return;
-    socket.timeout(10000).volatile.emit('player:typing', { draftPrompt, roomCode: roomCode || get().requestedRoomCode }, (error: Error | null, response?: CommandResponse) => {
+    socket.timeout(10000).volatile.emit('player:typing', { draftPrompt, roomCode: roomCode || get().requestedRoomCode, sessionId: get().requestedSessionId, roundToken: get().roomState.roundToken }, (error: Error | null, response?: CommandResponse) => {
       if (error || response?.ok === false) set({ connectionError: response?.error || 'Não foi possível sincronizar o rascunho. Verifique a conexão.' });
     });
   },

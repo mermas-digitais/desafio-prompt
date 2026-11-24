@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ensurePlayerSession, useGameStore } from '../store/useGameStore';
+import { api } from '../lib/api';
+import type { PlayerProfile } from '../../shared/types';
 import { selectOwnEvaluation, selectOwnPlayer } from '../lib/sessionHelpers';
 import { useSearch } from '@tanstack/react-router';
 import { usePlayerSessionStore } from '../store/usePlayerSessionStore';
@@ -64,7 +66,8 @@ export function useMobilePlayerSession() {
 
   const prevWordCountRef = useRef<number>(0);
 
-  const search = useSearch({ strict: false }) as { room?: string; round?: string };
+  const search = useSearch({ strict: false }) as { room?: string; round?: string; session?: string };
+  const currentUrlSession = search.session || '';
   const currentUrlRoom = (search.room || 'MDX26').toUpperCase().trim();
   const currentUrlRound = (search.round || '').trim();
 
@@ -74,21 +77,21 @@ export function useMobilePlayerSession() {
     ensurePlayerSession().then(async (id) => {
       if (!active) return;
       usePlayerSessionStore.setState({ deviceId: id });
-      useGameStore.getState().joinSessionRoom(currentUrlRoom);
-      const response = await identifyDevice(id, currentUrlRoom);
+      useGameStore.getState().joinSessionRoom(currentUrlRoom, currentUrlSession);
+      const response = currentUrlSession ? await identifyDevice(id, currentUrlRoom) : await api<{ ok: boolean; profile: PlayerProfile | null }>(`/api/player/profile?room=${encodeURIComponent(currentUrlRoom)}`);
       if (!active) return;
       if (response.ok && response.profile) syncFromServerProfile(response.profile);
       else setProfile(null);
     }).catch((error) => { if (active) setErrorMsg(error instanceof Error ? error.message : 'Não foi possível iniciar sua sessão privada. Recarregue a página.'); });
     return () => { active = false; };
-  }, [currentUrlRoom, identifyDevice, syncFromServerProfile, setProfile, setErrorMsg]);
+  }, [currentUrlRoom, currentUrlSession, identifyDevice, syncFromServerProfile, setProfile, setErrorMsg]);
 
   // Valida o QR code / token de rodada via API
   useEffect(() => {
     const controller = new AbortController();
     if (currentUrlRound) {
       fetch(
-        `/api/rounds/validate?room=${encodeURIComponent(currentUrlRoom)}&round=${encodeURIComponent(
+        `/api/rounds/validate?room=${encodeURIComponent(currentUrlRoom)}${currentUrlSession ? `&session=${encodeURIComponent(currentUrlSession)}` : ''}&round=${encodeURIComponent(
           currentUrlRound
         )}`, { signal: controller.signal }
       )
@@ -107,11 +110,11 @@ export function useMobilePlayerSession() {
         .catch((error) => { if (!controller.signal.aborted) setErrorMsg('Não foi possível validar o QR. Confira a conexão e recarregue.'); });
     }
     return () => controller.abort();
-  }, [currentUrlRoom, currentUrlRound, setIsExpiredQr, setExpiredRoundData, setErrorMsg]);
+  }, [currentUrlRoom, currentUrlSession, currentUrlRound, setIsExpiredQr, setExpiredRoundData, setErrorMsg]);
 
   // Sincroniza estatísticas quando uma rodada termina ou reseta rascunho na contagem
   useEffect(() => {
-    if (!deviceId || !isConnected || roomState.roomCode !== currentUrlRoom) return;
+    if (!deviceId || !isConnected || !currentUrlSession || roomState.sessionId !== currentUrlSession || roomState.roomCode !== currentUrlRoom) return;
     let active = true;
     identifyDevice(deviceId, currentUrlRoom).then((res) => {
       if (active && res?.ok) setProfile(res.profile || null);
@@ -122,11 +125,12 @@ export function useMobilePlayerSession() {
       prevWordCountRef.current = 0;
     }
     return () => { active = false; };
-  }, [roomState.phase, roomState.roomCode, isConnected, deviceId, currentUrlRoom, identifyDevice, setProfile, resetRoundDraft, setErrorMsg]);
+  }, [roomState.phase, roomState.roomCode, roomState.sessionId, isConnected, deviceId, currentUrlRoom, currentUrlSession, identifyDevice, setProfile, resetRoundDraft, setErrorMsg]);
 
   const roomProfile = profile?.roomCode === currentUrlRoom ? profile : null;
-  const myRoomSlot = selectOwnPlayer(roomState, roomProfile);
-  const myEvaluation = selectOwnEvaluation(roomState, roomProfile);
+  const stateMatches = roomState.roomCode === currentUrlRoom && roomState.sessionId === currentUrlSession;
+  const myRoomSlot = stateMatches ? selectOwnPlayer(roomState, roomProfile) : undefined;
+  const myEvaluation = stateMatches ? selectOwnEvaluation(roomState, roomProfile) : undefined;
 
   // Tick musical suave nos últimos 5s da partida
   useEffect(() => {
@@ -184,6 +188,7 @@ export function useMobilePlayerSession() {
       setIsSubmittingJoin(true);
 
       try {
+        if (!currentUrlSession) { setErrorMsg('Este link antigo não permite entrar em uma partida. Escaneie o QR atual da sessão no telão.'); return; }
         if (!currentUrlRound && !myRoomSlot) { setErrorMsg('Scanneie o QR Code da rodada no telão para entrar nesta sala.'); return; }
         const regRes = await registerPlayer({
           deviceId,
@@ -248,6 +253,7 @@ export function useMobilePlayerSession() {
       nickname,
       selectedAvatar,
       currentUrlRoom,
+      currentUrlSession,
       currentUrlRound,
       roomState.phase,
       myRoomSlot,

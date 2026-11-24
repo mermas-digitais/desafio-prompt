@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useSearch } from '@tanstack/react-router';
+import { RoomSessionsScreen } from './RoomSessionsScreen';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Crown, History, Share2, Sparkles, Trophy } from 'lucide-react';
 import { InstagramLogoIcon } from '../components/InstagramLogoIcon';
@@ -39,12 +41,19 @@ interface ActivePodiumSession {
 }
 
 export const PlayScreen: React.FC = () => {
+  const search = useSearch({ strict: false }) as { room?: string; session?: string; round?: string };
+  return !search.session && !search.round ? <RoomSessionsScreen roomCode={(search.room || 'MDX26').toUpperCase().trim()} /> : <ActivePlayScreen />;
+};
+
+const ActivePlayScreen: React.FC = () => {
+  const sessionId = useGameStore((store) => store.requestedSessionId);
   const phase = useGameStore((s) => s.roomState.phase);
   const countdownLeft = useGameStore((s) => s.roomState.countdownLeft);
   const evaluations = useGameStore((s) => s.roomState.evaluations);
   const currentRevealIndex = useGameStore((s) => s.roomState.currentRevealIndex);
   const challenge = useGameStore((s) => s.roomState.challenge);
   const roomName = useGameStore((s) => s.roomState.roomName);
+  const sessionName = useGameStore((s) => s.roomState.sessionName);
   const roundId = useGameStore((s) => s.roomState.roundId);
   const roomIsOpen = useGameStore((s) => s.roomState.isOpen);
   const connectionError = useGameStore((s) => s.connectionError);
@@ -97,7 +106,7 @@ export const PlayScreen: React.FC = () => {
   useEffect(() => {
     setShareData(null); setShareRoundId(''); setIsShareStudioOpen(false); setActivePodiumSession(null); setSelectedHistoryMatch(null);
     setPersonalHistory(profile?.roomCode === currentUrlRoom ? getPersonalMatchHistory(currentUrlRoom, profile.id) : []);
-  }, [currentUrlRoom, profile?.id]);
+  }, [currentUrlRoom, sessionId, profile?.id]);
 
   // Captura um "snapshot" enriquecido do resultado para o card compartilhável.
   useEffect(() => {
@@ -240,6 +249,7 @@ export const PlayScreen: React.FC = () => {
       />
 
       <main className="flex-1 w-full max-w-md mx-auto px-4 pt-4 flex flex-col gap-4 relative z-10">
+        {sessionName && <div className="text-sm text-[#6E4F7D]"><p>{roomName} · {currentUrlRoom}</p><p className="font-semibold text-[#330043]">Sessão: {sessionName}</p></div>}
         {connectionError && <p role="alert" className="org-notice org-notice-error">{connectionError}</p>}
         {errorMsg && <p role="alert" className="org-notice org-notice-error">{errorMsg}</p>}
         {!myRoomSlot && !roomIsOpen && <section className="org-notice space-y-2"><h2 className="font-semibold text-lg">Entradas fechadas</h2><p>A sala {currentUrlRoom} não recebe novas participantes agora. Quem já entrou pode continuar a rodada. Aguarde a organização reabrir as entradas.</p></section>}
@@ -395,7 +405,7 @@ export const PlayScreen: React.FC = () => {
         )}
 
         {/* QR CODE EXPIRADO (QUANDO A RODADA JÁ ENCERROU OU QR É ANTIGO) */}
-        {!isShowingPodium && isExpiredQr && !myRoomSlot && roomIsOpen && (
+        {!isShowingPodium && isExpiredQr && !myRoomSlot && (
           <PlayExpiredQrView
             roomName={roomName}
             roomCode={currentUrlRoom}
