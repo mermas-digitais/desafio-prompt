@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { OFFICIAL_CHALLENGES } from '../src/server/db/challengesData.js';
 
 test('every playable challenge has a unique, decodable image and scoring data', async () => {
-  assert.equal(OFFICIAL_CHALLENGES.length, 50);
+  assert.equal(OFFICIAL_CHALLENGES.length, 100);
   const ids = new Set<string>();
   const urls = new Set<string>();
   const hashes = new Set<string>();

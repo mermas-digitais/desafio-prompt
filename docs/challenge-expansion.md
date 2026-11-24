@@ -2,11 +2,11 @@
 
 ## Estado atual
 
-Catálogo atual: **50 desafios**, todos com **50 imagens WebP (1024×1024)** em `public/challenges/`. Os 50 arquivos têm caminhos próprios; o teste `tests/challenge-catalog.test.ts` verifica arquivo decodificável, IDs/URLs/conteúdo sem duplicatas e dados de avaliação presentes.
+Catálogo atual: **100 desafios**, todos com **100 imagens WebP (1024×1024)** em `public/challenges/`. Os 100 arquivos têm caminhos próprios; o teste `tests/challenge-catalog.test.ts` verifica arquivo decodificável, IDs/URLs/conteúdo sem duplicatas e dados de avaliação presentes.
 
 Concluído em 2026-11-24:
-- Geradas as **20 cenas novas** em `.webp` (1024×1024) e cadastradas em `src/server/db/challengesData.ts` e `src/shared/showcaseData.ts` com prompt completo em português, camadas (`subjectLayer`, `styleLayer`, `environmentLayer`), dicas de 60s e 30s (`hint1`, `hint2`), grupos semânticos com sinônimos e pesos calibrados (`subject`, `style`, `environment`) e palpites de bots (`botPrompts`) coerentes com o que cada imagem exibe.
-- Substituídos os 5 arquivos `.svg` (`boto-cor-de-rosa-synthwave`, `panda-quimico-bambu`, `canguru-boxeador-arcade`, `fenix-cristal-vulcao` e `dragao-biblioteca-cha`) por imagens `.webp` 1024×1024 geradas, preservando os IDs originais dos desafios.
+- Primeira expansão (30 → 50): geradas **20 cenas novas** em `.webp` (1024×1024) e substituídos os 5 arquivos `.svg` (`boto-cor-de-rosa-synthwave`, `panda-quimico-bambu`, `canguru-boxeador-arcade`, `fenix-cristal-vulcao` e `dragao-biblioteca-cha`) por imagens `.webp` 1024×1024 geradas, preservando os IDs originais dos desafios.
+- Segunda expansão (50 → 100): geradas **mais 50 cenas novas** em `.webp` (1024×1024) e cadastradas em `src/server/db/challengesData.ts` e `src/shared/showcaseData.ts` com prompt completo em português, camadas (`subjectLayer`, `styleLayer`, `environmentLayer`), dicas de 60s e 30s (`hint1`, `hint2`), grupos semânticos com sinônimos e pesos calibrados (`subject`, `style`, `environment`) e palpites de bots (`botPrompts`) coerentes com o que cada imagem exibe.
 
 ## Cenas novas para completar 50
 
