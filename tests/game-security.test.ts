@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
+import crypto from 'node:crypto';
 import type { PlayerProfile } from '../src/shared/types.js';
 
 const boards = { general: [], points: [], wins: [], stats: { totalPlayers: 0, totalMatches: 0, highestScoreEver: 0 } };
@@ -140,6 +141,92 @@ test('prompt hints reveal at most one word at 60s and three at 30s, full prompt 
       assert.equal(engine.getState().challenge!.fullPrompt, challenge.fullPrompt);
     }
   }
+});
+
+test('real round lifecycle uses every image exactly once per deck without skipping idle cards', async () => {
+  const { engine } = fixture();
+  try {
+    await engine.start();
+    const ids: string[] = [];
+    for (let round = 0; round < OFFICIAL_CHALLENGES.length * 4; round++) {
+      (engine as any).startCountdown();
+      const id = engine.getState().challenge!.id;
+      (engine as any).startPlaying();
+      assert.equal(engine.getState().challenge!.id, id);
+      ids.push(id);
+      engine.resetToIdle();
+    }
+    for (let offset = 0; offset < ids.length; offset += OFFICIAL_CHALLENGES.length) {
+      assert.deepEqual([...new Set(ids.slice(offset, offset + OFFICIAL_CHALLENGES.length))].sort(), OFFICIAL_CHALLENGES.map((challenge) => challenge.id).sort());
+    }
+    for (let index = 0; index < ids.length; index++) {
+      assert.equal(ids.slice(Math.max(0, index - 10), index).includes(ids[index]), false);
+    }
+  } finally { engine.dispose(); }
+});
+
+test('idle resets and lobby cancellation do not draw or skip images', async () => {
+  const { engine } = fixture();
+  try {
+    await engine.start();
+    assert.equal(engine.getState().challenge, null);
+    for (let index = 0; index < 5; index++) {
+      engine.joinRoom(profile(), 'socket', engine.getState().roundToken);
+      assert.equal(engine.cancelLobby(engine.getState().roundToken).ok, true);
+      assert.equal(engine.getState().challenge, null);
+      assert.equal((engine as any).challengeDeck.length, 0);
+    }
+    (engine as any).startCountdown();
+    const remaining = (engine as any).challengeDeck.length;
+    engine.resetToIdle();
+    engine.resetToIdle();
+    assert.equal((engine as any).challengeDeck.length, remaining);
+  } finally { engine.dispose(); }
+});
+
+test('shuffle keeps room decks independent and distributes first positions across the catalog', (t) => {
+  let seed = 20261124;
+  const random = mock.method(crypto, 'randomInt', (min: number, max: number) => {
+    assert.equal(min, 0);
+    assert.ok(max > 1 && max <= OFFICIAL_CHALLENGES.length);
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return min + Math.floor((seed / 0x100000000) * (max - min));
+  });
+  try {
+    const a = fixture('A').engine;
+    const b = fixture('B').engine;
+    const counts = new Map(OFFICIAL_CHALLENGES.map((challenge) => [challenge.id, 0]));
+    for (let cycle = 0; cycle < 600; cycle++) {
+      for (let index = 0; index < OFFICIAL_CHALLENGES.length; index++) {
+        const challenge = (a as any).pickNextChallenge();
+        if (index === 0) counts.set(challenge.id, counts.get(challenge.id)! + 1);
+      }
+    }
+    const expected = 600 / OFFICIAL_CHALLENGES.length;
+    const chiSquared = [...counts.values()].reduce((sum, count) => sum + (count - expected) ** 2 / expected, 0);
+    assert.ok([...counts.values()].every((count) => count > 0));
+    assert.ok(chiSquared < OFFICIAL_CHALLENGES.length * 3, `first-position distribution drift: ${chiSquared}`);
+    t.diagnostic(`600 decks / ${600 * OFFICIAL_CHALLENGES.length} draws; first-position counts ${Math.min(...counts.values())}–${Math.max(...counts.values())}, expected ${expected}; chi-squared ${chiSquared.toFixed(2)}`);
+    assert.equal((b as any).challengeDeck.length, 0);
+    assert.equal(b.getState().challenge, null);
+    assert.equal(random.mock.callCount(), 600 * (OFFICIAL_CHALLENGES.length - 1));
+  } finally { random.mock.restore(); }
+});
+
+test('recent cards at the front of a fresh deck are postponed, never discarded', () => {
+  const { engine } = fixture();
+  const recent = OFFICIAL_CHALLENGES.slice(-10);
+  (engine as any).recentChallengeIds = recent.map((challenge) => challenge.id);
+  (engine as any).challengeDeck = [...recent, ...OFFICIAL_CHALLENGES.slice(0, -10)];
+  const drawn: string[] = [];
+  for (let index = 0; index < OFFICIAL_CHALLENGES.length; index++) {
+    const id = (engine as any).pickNextChallenge().id;
+    const window = [...recent.map((challenge) => challenge.id), ...drawn].slice(-10);
+    assert.equal(window.includes(id), false);
+    drawn.push(id);
+  }
+  assert.equal(new Set(drawn).size, OFFICIAL_CHALLENGES.length);
+  assert.equal((engine as any).challengeDeck.length, 0);
 });
 
 test('reset invalidates delayed AI evaluation before any persistence', async () => {

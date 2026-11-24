@@ -56,6 +56,7 @@ export class GameEngine {
   private players: RoomPlayer[] = [];
   private currentChallenge: ChallengeSeedData | null = null;
   private challengeDeck: ChallengeSeedData[] = [];
+  private recentChallengeIds: string[] = [];
   private evaluations: PlayerRoundEvaluation[] = [];
   private currentRevealIndex = 0;
   private revealStepTimer = 8;
@@ -236,7 +237,6 @@ export class GameEngine {
 
   public async start(): Promise<void> {
     this.leaderboards = await database.getLeaderboards(100, this.roomCode);
-    this.pickNextChallenge();
 
     this.resume();
   }
@@ -279,14 +279,6 @@ export class GameEngine {
       const j = crypto.randomInt(0, i + 1);
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-    // Evita que a primeira imagem do novo baralho seja idêntica à última jogada
-    if (
-      this.currentChallenge &&
-      shuffled.length > 1 &&
-      shuffled[0].id === this.currentChallenge.id
-    ) {
-      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
-    }
     this.challengeDeck = shuffled;
   }
 
@@ -294,7 +286,11 @@ export class GameEngine {
     if (this.challengeDeck.length === 0) {
       this.refillAndShuffleDeck();
     }
-    const next = this.challengeDeck.shift() || OFFICIAL_CHALLENGES[0];
+    // Keep recent images out of the next draws, including across deck boundaries.
+    const index = this.challengeDeck.findIndex((challenge) => !this.recentChallengeIds.includes(challenge.id));
+    const [next] = this.challengeDeck.splice(Math.max(0, index), 1);
+    const cooldown = Math.min(10, OFFICIAL_CHALLENGES.length - 1);
+    this.recentChallengeIds = cooldown ? [...this.recentChallengeIds, next.id].slice(-cooldown) : [];
     this.currentChallenge = next;
     return this.currentChallenge;
   }
@@ -878,7 +874,7 @@ export class GameEngine {
     this.podiumTimeLeft = 10;
     this.botSchedules = [];
     this.isEvaluating = false;
-    this.pickNextChallenge();
+    this.currentChallenge = null;
     this.broadcastState();
   }
 

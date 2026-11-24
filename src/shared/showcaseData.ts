@@ -171,7 +171,7 @@ export const ARENA_SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: 'boto-cor-de-rosa-synthwave',
     title: 'Boto-Cor-de-Rosa no Rio Synthwave',
     category: 'Amazônia & Retrô-Futurismo',
-    imageUrl: '/challenges/boto_cor_de_rosa_synthwave.svg',
+    imageUrl: '/challenges/boto_cor_de_rosa_synthwave.webp',
     samplePrompt:
       'Boto-cor-de-rosa cibernético usando chapéu neon saltando de um rio amazônico espelhado diante de um sol synthwave roxo e dourado',
   },
@@ -179,7 +179,7 @@ export const ARENA_SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: 'panda-quimico-bambu',
     title: 'Panda Cientista no Laboratório de Bambu',
     category: 'Ciência & Natureza',
-    imageUrl: '/challenges/panda_quimico_bambu.svg',
+    imageUrl: '/challenges/panda_quimico_bambu.webp',
     samplePrompt:
       'Urso panda fofo de jaleco branco e óculos fazendo experimento químico que solta nuvens de estrelas coloridas entre bambus',
   },
@@ -187,7 +187,7 @@ export const ARENA_SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: 'canguru-boxeador-arcade',
     title: 'Canguru Campeão no Ringue Arcade',
     category: 'Esporte & Fliperama',
-    imageUrl: '/challenges/canguru_boxeador_arcade.svg',
+    imageUrl: '/challenges/canguru_boxeador_arcade.webp',
     samplePrompt:
       'Canguru atlético com luvas de boxe elétricas azuis e jaqueta brilhante em ringue futurista cercado por placares holográficos',
   },
@@ -195,7 +195,7 @@ export const ARENA_SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: 'fenix-cristal-vulcao',
     title: 'Fênix de Cristal sobre o Vulcão de Ametista',
     category: 'Mitologia & Fantasia Épica',
-    imageUrl: '/challenges/fenix_cristal_vulcao.svg',
+    imageUrl: '/challenges/fenix_cristal_vulcao.webp',
     samplePrompt:
       'Fênix majestosa feita de cristais translúcidos roxos, rosas e dourados abrindo as asas sobre a cratera de um vulcão de ametista',
   },
@@ -243,8 +243,168 @@ export const ARENA_SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: 'dragao-biblioteca-cha',
     title: 'Dragãozinho Leitor na Casa de Chá Mágica',
     category: 'Fantasia Aconchegante & Leitura',
-    imageUrl: '/challenges/dragao_biblioteca_cha.svg',
+    imageUrl: '/challenges/dragao_biblioteca_cha.webp',
     samplePrompt:
       'Pequeno dragão verde de óculos redondos lendo um livro na poltrona enquanto aquece uma chaleira de chá com sopro de fogo',
+  },
+  {
+    id: 'jacare-astronomo',
+    title: 'Jacaré Astrônomo no Manguezal',
+    category: 'Astronomia & Biodiversidade',
+    imageUrl: '/challenges/jacare-astronomo.webp',
+    samplePrompt:
+      'Jacaré simpático de cachecol violeta observando estrelas por um telescópio de latão dourado num observatório sobre o manguezal',
+  },
+  {
+    id: 'tamandua-carteiro',
+    title: 'Tamanduá Carteiro nas Ilhas Flutuantes',
+    category: 'Aventura & Papel Recortado',
+    imageUrl: '/challenges/tamandua-carteiro.webp',
+    samplePrompt:
+      'Tamanduá de bolsa vermelha entregando carta numa casinha em ilha flutuante ligada por pontes de corda em diorama de papel',
+  },
+  {
+    id: 'coelho-relojoeiro',
+    title: 'Coelho Relojoeiro na Torre de Massinha',
+    category: 'Stop-Motion & Ofícios',
+    imageUrl: '/challenges/coelho-relojoeiro.webp',
+    samplePrompt:
+      'Coelho branco de macacão azul diante de um relógio dourado iluminado na oficina de uma torre em estilo massinha stop-motion',
+  },
+  {
+    id: 'lontra-engenheira',
+    title: 'Lontra Engenheira na Vila Solarpunk',
+    category: 'Sustentabilidade & Engenharia',
+    imageUrl: '/challenges/lontra-engenheira.webp',
+    samplePrompt:
+      'Lontra de capacete amarelo construindo roda d’água de madeira numa vila ecológica com estufas de vidro e painéis solares',
+  },
+  {
+    id: 'sapo-saxofonista',
+    title: 'Sapo Saxofonista na Noite de Jazz',
+    category: 'Música & Belas Artes',
+    imageUrl: '/challenges/sapo-saxofonista.webp',
+    samplePrompt:
+      'Sapo elegante de terno vinho tocando saxofone dourado sob um poste antigo numa rua de paralelepípedos chuvosa à noite',
+  },
+  {
+    id: 'peixe-balao-confeiteiro',
+    title: 'Peixe-Balão Confeiteiro Submarino',
+    category: 'Gastronomia & Fundo do Mar',
+    imageUrl: '/challenges/peixe-balao-confeiteiro.webp',
+    samplePrompt:
+      'Peixe-balão fofo de chapéu branco de chef decorando um bolo de dois andares numa confeitaria submarina cercada por corais',
+  },
+  {
+    id: 'caranguejo-ferreiro',
+    title: 'Caranguejo Ferreiro na Forja do Vulcão',
+    category: 'Games & Arte Voxel',
+    imageUrl: '/challenges/caranguejo-ferreiro.webp',
+    samplePrompt:
+      'Caranguejo vermelho de avental forjando uma espada dourada incandescente na bigorna em uma oficina voxel na encosta de um vulcão',
+  },
+  {
+    id: 'morcego-bibliotecario',
+    title: 'Morcego Bibliotecário ao Luar Gótico',
+    category: 'Literatura & Arte em Papel',
+    imageUrl: '/challenges/morcego-bibliotecario.webp',
+    samplePrompt:
+      'Morcego simpático de óculos organizando livros numa biblioteca gótica sob a luz da lua cheia em papel recortado em camadas',
+  },
+  {
+    id: 'girafa-fotografa',
+    title: 'Girafa Fotógrafa no Passeio de Balão',
+    category: 'Viagem & Ilustração Retrô',
+    imageUrl: '/challenges/girafa-fotografa.webp',
+    samplePrompt:
+      'Girafa de chapéu de palha fotografando a savana dourada ao lado de um balão de ar quente colorido em ilustração retrô',
+  },
+  {
+    id: 'zebra-patinadora',
+    title: 'Zebra Patinadora na Pista Vaporwave',
+    category: 'Esporte & Estética Retrô',
+    imageUrl: '/challenges/zebra-patinadora.webp',
+    samplePrompt:
+      'Zebra estilosa de jaqueta rosa choque e patins deslizando numa pista neon espelhada sob um globo de discoteca vaporwave',
+  },
+  {
+    id: 'cachorro-arqueologo',
+    title: 'Cachorro Arqueólogo nas Ruínas do Deserto',
+    category: 'História & Quadrinhos',
+    imageUrl: '/challenges/cachorro-arqueologo.webp',
+    samplePrompt:
+      'Cachorro sorridente de chapéu de explorador limpando um vaso antigo decorado em azul entre colunas de ruínas no deserto',
+  },
+  {
+    id: 'gato-vendedor-planetas',
+    title: 'Gato Mercador de Planetas na Feira Noturna',
+    category: 'Fantasia & Miniatura',
+    imageUrl: '/challenges/gato-vendedor-planetas.webp',
+    samplePrompt:
+      'Gatinho laranja de avental vendendo pequenos planetas luminosos numa banca de feira noturna iluminada por varal de lâmpadas',
+  },
+  {
+    id: 'abelha-pilota-dirigivel',
+    title: 'Abelha Aviadora sobre a Estufa Gigante',
+    category: 'Natureza & Aviação',
+    imageUrl: '/challenges/abelha-pilota-dirigivel.webp',
+    samplePrompt:
+      'Abelha fofa de óculos de aviadora pilotando um pequeno dirigível de madeira sobre flores gigantes dentro de uma estufa de vidro',
+  },
+  {
+    id: 'joaninha-inventora',
+    title: 'Joaninha Inventora na Oficina de Cogumelos',
+    category: 'Macro Fantasia & Steampunk',
+    imageUrl: '/challenges/joaninha-inventora.webp',
+    samplePrompt:
+      'Joaninha vermelha usando lupa de latão montando uma máquina de engrenagens douradas numa oficina miniatura entre cogumelos',
+  },
+  {
+    id: 'lobo-ceramista',
+    title: 'Lobo Ceramista no Ateliê de Inverno',
+    category: 'Artesanato & Aquarela',
+    imageUrl: '/challenges/lobo-ceramista.webp',
+    samplePrompt:
+      'Lobo cinzento amigável de avental moldando uma tigela de argila terracota no torno giratório em um ateliê de cerâmica',
+  },
+  {
+    id: 'coala-meteorologista',
+    title: 'Coala Meteorologista na Estação das Nuvens',
+    category: 'Clima & Stop-Motion',
+    imageUrl: '/challenges/coala-meteorologista.webp',
+    samplePrompt:
+      'Coala fofo de capa de chuva amarela segurando medidor de vento numa estação meteorológica sobre as nuvens em stop-motion',
+  },
+  {
+    id: 'iguana-tenista',
+    title: 'Iguana Tenista no Terraço da Cidade',
+    category: 'Esporte & Quadrinhos',
+    imageUrl: '/challenges/iguana-tenista.webp',
+    samplePrompt:
+      'Iguana verde atlética de viseira rebatendo uma bola de tênis amarela numa quadra azul no terraço de um prédio em estilo HQ',
+  },
+  {
+    id: 'cavalo-marinho-rei',
+    title: 'Rei Cavalo-Marinho em Vitral Submarino',
+    category: 'Fundo do Mar & Vitral',
+    imageUrl: '/challenges/cavalo-marinho-rei.webp',
+    samplePrompt:
+      'Cavalo-marinho dourado coroado sentado num trono de corais cercado por peixes em estilo vitral colorido turquesa e dourado',
+  },
+  {
+    id: 'esquilo-cartografo',
+    title: 'Esquilo Cartógrafo na Casa da Árvore',
+    category: 'Aventura & Lápis de Cor',
+    imageUrl: '/challenges/esquilo-cartografo.webp',
+    samplePrompt:
+      'Esquilo ruivo desenhando um mapa sobre uma mesa dentro do tronco de uma árvore com janelas redondas e estantes de livros',
+  },
+  {
+    id: 'borboleta-maestra',
+    title: 'Borboleta Maestra e a Orquestra do Jardim',
+    category: 'Música & Colagem de Papel',
+    imageUrl: '/challenges/borboleta-maestra.webp',
+    samplePrompt:
+      'Borboleta roxa e verde com uma orquestra de insetos músicos tocando instrumentos num jardim de flores gigantes em colagem de papel',
   },
 ];
