@@ -1,0 +1,73 @@
+// Playwright MCP browser_run_code_unsafe filename; test:ui:serve fixture only.
+async (page) => {
+  const base = 'http://127.0.0.1:5187';
+  const assert = (value, message) => { if (!value) throw new Error(message); };
+  const browser = page.context().browser();
+  const publicContext = await browser.newContext();
+  const playerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const guest = await publicContext.newPage();
+  const player = await playerContext.newPage();
+  const anotherTab = await playerContext.newPage();
+  const tv2 = await page.context().newPage();
+  try {
+    await guest.goto(`${base}/tv?room=MDX26`);
+    await guest.getByText('Nenhuma sessão ativa.', { exact: false }).waitFor();
+    assert(await guest.getByRole('button', { name: 'Criar sessão', exact: true }).count() === 0, 'Anonymous user can create a session');
+    await page.goto(`${base}/admin`);
+    await page.getByLabel('E-mail', { exact: true }).fill('ana@example.test');
+    await page.getByLabel('Senha', { exact: true }).fill('review-only-password');
+    await page.getByRole('button', { name: 'Entrar na minha conta', exact: true }).click();
+    await page.getByRole('heading', { name: 'Ranking por sala', exact: true }).waitFor();
+    const create = async (target, name) => {
+      await target.goto(`${base}/tv?room=MDX26`);
+      await target.getByLabel('Nome da sessão', { exact: true }).fill(name);
+      await target.getByRole('button', { name: 'Criar sessão', exact: true }).click();
+      await target.waitForURL(/session=/);
+      await target.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).waitFor();
+      return new URL(target.url()).searchParams.get('session');
+    };
+    const a = await create(page, 'TV do palco');
+    const b = await create(tv2, 'TV da entrada');
+    assert(a !== b, 'Sessions share an ID');
+    await guest.getByRole('link', { name: 'Assistir TV do palco', exact: true }).click();
+    await guest.getByText('Assistindo', { exact: true }).waitFor();
+    const states = await page.evaluate(async ([a, b]) => Promise.all([a, b].map(async (id) => (await fetch(`/api/state?room=MDX26&session=${id}`)).json())), [a, b]);
+    const playUrl = (id, token) => `${base}/play?room=MDX26&session=${id}&round=${encodeURIComponent(token)}`;
+    await player.goto(playUrl(a, states[0].roundToken));
+    await player.getByPlaceholder('Ex: Mermã Cyber, AdaTech...').fill('Participante QA');
+    await player.getByRole('button', { name: 'Salvar e Entrar na Rodada', exact: true }).click();
+    await page.getByText('Preparação da Rodada', { exact: false }).waitFor();
+    await page.getByRole('banner').getByRole('link', { name: 'Controlando', exact: true }).click();
+    await page.getByRole('banner').getByRole('link', { name: 'Assistindo', exact: true }).waitFor();
+    assert(await page.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).count() === 0, 'Authenticated lobby watcher has controls');
+    await page.getByRole('banner').getByRole('link', { name: 'Assistindo', exact: true }).click();
+    await page.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).waitFor();
+    await guest.getByText('Preparação da Rodada', { exact: false }).waitFor();
+    assert(await guest.getByRole('button', { name: 'Cancelar partida…', exact: true }).count() === 0, 'Spectator has cancellation controls');
+    assert(await tv2.getByText('Preparação da Rodada', { exact: false }).count() === 0, 'Other lobby was started');
+    await anotherTab.goto(playUrl(b, states[1].roundToken));
+    await anotherTab.getByRole('button', { name: /Entrar na Rodada \(/ }).click();
+    await anotherTab.getByRole('alert').filter({ hasText: 'Você já participa de uma partida em' }).waitFor();
+    await page.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancelar partida…', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancelar partida', exact: true }).click();
+    await player.getByText('Partida cancelada pela organização.', { exact: false }).waitFor();
+    await anotherTab.getByRole('button', { name: /Entrar na Rodada \(/ }).click();
+    await page.keyboard.press('Escape');
+    await tv2.getByText('Preparação da Rodada', { exact: false }).waitFor();
+    assert(await page.getByRole('button', { name: 'Cancelar partida…', exact: true }).count() === 0, 'Cancellation changed another session');
+    await page.goto(`${base}/tv?room=MDX26`);
+    await page.getByRole('link', { name: 'Assistir TV da entrada', exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 667 });
+    assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), 'Session directory overflows on mobile');
+    await page.screenshot({ path: 'C:/Users/Schneider/AppData/Local/Temp/opencode/multi-session-directory.png' });
+    await page.getByRole('button', { name: 'Encerrar TV da entrada…', exact: true }).click();
+    const ending = page.getByRole('dialog', { name: 'Encerrar TV da entrada?', exact: true });
+    await ending.getByRole('button', { name: 'Encerrar sessão', exact: true }).click();
+    await ending.waitFor({ state: 'hidden' });
+    await tv2.waitForURL(/\/tv\?room=MDX26.*ended=true/);
+    assert(await page.getByRole('link', { name: 'Assistir TV do palco', exact: true }).count() === 1, 'Ending removed the other session');
+    assert(await page.getByRole('link', { name: 'Assistir TV da entrada', exact: true }).count() === 0, 'Ended session remains in directory');
+    return { checks: ['public read-only directory', 'staff creates two independent TVs', 'public mirror occupies no slot', 'same profile across sessions', 'second tab cannot play twice', 'cancel affects one lobby only', 'released participant joins other TV', 'mobile directory'] };
+  } finally { await publicContext.close(); await playerContext.close(); await tv2.close(); }
+}

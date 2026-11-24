@@ -150,6 +150,7 @@ export interface LeaderboardsPayload {
 }
 
 export interface ExpiredRoundSummary {
+  sessionId?: string;
   roundId: string;
   roundToken: string;
   roomCode: string;
@@ -163,6 +164,8 @@ export interface ExpiredRoundSummary {
 }
 
 export interface GameRoomState {
+  sessionId?: string;
+  sessionName?: string;
   roomCode: string;
   roomName: string;
   isOpen: boolean;
@@ -179,4 +182,14 @@ export interface GameRoomState {
   currentRevealIndex: number;   // 0..4 durante a fase REVEALING (1 por 1)
   revealStepTimer: number;      // Segundos restantes para o próximo card no reveal
   leaderboards: LeaderboardsPayload;
+}
+
+export interface GameSessionMetadata {
+  id: string;
+  roomCode: string;
+  name: string;
+  isOpen: boolean;
+  phase: GamePhase;
+  playersCount: number;
+  roundToken: string;
 }

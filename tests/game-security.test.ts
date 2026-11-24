@@ -8,7 +8,11 @@ let evaluate: (...args: any[]) => Promise<any[]> = async () => [];
 const db = {
   getLeaderboards: mock.fn(async () => boards),
   getRooms: mock.fn(async (): Promise<any[]> => []),
-  createRoom: mock.fn(async (..._args: any[]) => {}),
+  createRoom: mock.fn(async (code: string, name: string) => ({ code, name, isOpen: true, moderatorId: null, createdAt: '', updatedAt: '' })),
+  startGameRuntime: mock.fn(async (..._args: any[]) => {}),
+  getGameSessions: mock.fn(async () => []),
+  createGameSession: mock.fn(async (..._args: any[]) => {}),
+  finishGameSession: mock.fn(async (..._args: any[]) => {}),
   upsertRoom: mock.fn(async (..._args: any[]) => {}),
   setRoomStatus: mock.fn(async (..._args: any[]) => {}),
   deleteRoom: mock.fn(async (..._args: any[]) => true),
@@ -33,6 +37,44 @@ function deferred<T>() {
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
+
+test('runtime loss makes the manager unavailable and failed session creation never publishes an engine', async () => {
+  const { io } = fixture();
+  const manager = new RoomManager(io as any);
+  await manager.init();
+  await manager.createRoom({ roomCode: 'FAILQA', name: 'Failure QA' });
+  db.getLeaderboards.mock.mockImplementationOnce(async () => { throw new Error('ranking unavailable'); });
+  const id = crypto.randomUUID();
+  await assert.rejects(manager.createSession({ id, roomCode: 'FAILQA', name: 'TV', createdBy: null }), /ranking unavailable/);
+  assert.equal(manager.listSessions().length, 0);
+  assert.equal(db.finishGameSession.mock.calls.at(-1)!.arguments[0], id);
+  await manager.createSession({ id: crypto.randomUUID(), roomCode: 'FAILQA', name: 'TV', createdBy: null });
+  const loseRuntime = db.startGameRuntime.mock.calls.at(-1)!.arguments[0];
+  loseRuntime();
+  assert.equal(manager.isAvailable(), false);
+  assert.equal(manager.getRoom('FAILQA'), undefined);
+  assert.equal((await manager.createSession({ id: crypto.randomUUID(), roomCode: 'FAILQA', name: 'TV 2', createdBy: null })).ok, false);
+  manager.dispose();
+});
+
+test('failed session termination preserves the same lobby and participants', async () => {
+  const { io } = fixture();
+  const manager = new RoomManager(io as any);
+  try {
+    await manager.createRoom({ roomCode: 'ENDQA', name: 'End QA' });
+    const id = crypto.randomUUID();
+    await manager.createSession({ id, roomCode: 'ENDQA', name: 'TV', createdBy: null });
+    const engine = manager.getRoom('ENDQA', id)!;
+    const token = engine.getState().roundToken;
+    engine.joinRoom(profile(), 'socket', token);
+    db.finishGameSession.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
+    await assert.rejects(manager.endSession('ENDQA', id), /write failed/);
+    assert.equal(manager.getRoom('ENDQA', id), engine);
+    assert.equal(engine.getState().roundToken, token);
+    assert.equal(engine.getState().players.length, 1);
+    assert.equal(engine.getState().phase, 'LOBBY');
+  } finally { manager.dispose(); }
+});
 
 test('public state redacts private identities, drafts and hidden challenge words; emits only to room', () => {
   const { engine, events } = fixture();
@@ -256,12 +298,12 @@ test('rooms need no owner; duplicate and invalid creation rejected; failed write
     assert.equal((await manager.createRoom({ roomCode: 'ROOM1', name: 'Overwrite' })).ok, false);
     assert.equal((await manager.createRoom({ roomCode: 'TOO-LONG-CODE-123', name: 'Bad' })).ok, false);
     assert.equal((await manager.openRoom({ roomCode: 'UNKNOWN', name: 'Unknown' })).ok, false);
+    await manager.createSession({ id: crypto.randomUUID(), roomCode: 'ROOM1', name: 'TV One', createdBy: null });
     db.upsertRoom.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
     await assert.rejects(manager.openRoom({ roomCode: 'ROOM1', name: 'Not persisted' }));
     assert.equal(manager.getRoom('ROOM1')!.getState().roomName, 'One');
-    db.setRoomStatus.mock.mockImplementationOnce(async () => { throw new Error('write failed'); });
-    await assert.rejects(manager.closeRoom('ROOM1'));
-    assert.equal(manager.getRoom('ROOM1')!.getState().isOpen, true);
+    assert.equal((await manager.closeRoom('ROOM1')).ok, true);
+    assert.equal(manager.getRoom('ROOM1')!.getState().isOpen, false);
   } finally {
     manager.dispose();
   }
@@ -383,7 +425,7 @@ test('database creation collisions never publish an engine', async () => {
   db.createRoom.mock.mockImplementationOnce(async () => { throw new Error('Room already exists'); });
   await assert.rejects(manager.createRoom({ roomCode: 'COLLISION', name: 'Collision' }));
   assert.equal(manager.getRoom('COLLISION'), undefined);
-  assert.equal((manager as any).creating.size, 0);
+  assert.equal((manager as any).mutating.size, 0);
   manager.dispose();
 });
 
@@ -392,6 +434,7 @@ test('deletion blocks evaluation, persistence and edits; failed deletion resumes
   const manager = new RoomManager(io as any);
   try {
     await manager.createRoom({ roomCode: 'A', name: 'A' });
+    await manager.createSession({ id: crypto.randomUUID(), roomCode: 'A', name: 'TV A', createdBy: null });
     const engine = manager.getRoom('A')!;
     const token = engine.getState().roundToken;
     for (const flag of ['isEvaluating', 'committingRounds']) {
@@ -400,8 +443,8 @@ test('deletion blocks evaluation, persistence and edits; failed deletion resumes
       (engine as any)[flag] = 0;
     }
     const edit = deferred<void>();
-    db.setRoomStatus.mock.mockImplementationOnce(async () => edit.promise);
-    const closing = manager.closeRoom('A');
+    db.upsertRoom.mock.mockImplementationOnce(async () => edit.promise);
+    const closing = manager.openRoom({ roomCode: 'A', name: 'Edited A' });
     assert.equal((await manager.deleteRoom('A')).ok, false);
     edit.resolve();
     await closing;

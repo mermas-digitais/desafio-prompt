@@ -123,9 +123,10 @@ export const TVRankingCard: React.FC = React.memo(() => {
               <Sparkles className="w-3 h-3 text-[#FF4A97]" />
               <span>Hall da Fama • MDX STEAM 2026</span>
             </div>
-            <h1 className="font-display text-xl lg:text-2xl text-[#330043] leading-tight">
-              Ranking de Participantes
-            </h1>
+            <h2 className="font-display text-xl lg:text-2xl text-[#330043] leading-tight">
+              Ranking da sala
+            </h2>
+            <p className="text-xs text-[#6E4F7D]">Compartilhado entre as sessões desta sala</p>
           </div>
         </div>
 

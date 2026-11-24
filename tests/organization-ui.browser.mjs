@@ -8,6 +8,17 @@ async (page) => {
   const baseURL = 'http://127.0.0.1:5187';
   const email = 'ui-review@example.test';
   const password = 'review-only-password';
+  const sessions = new Map();
+  const ensureSession = async (code) => {
+    if (!sessions.has(code)) sessions.set(code, await page.evaluate(async (roomCode) => {
+      const { sessions } = await (await fetch(`/api/sessions?room=${roomCode}`)).json();
+      if (sessions.length) return sessions[0].id;
+      const result = await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode, id: crypto.randomUUID(), name: 'TV QA' }) });
+      if (!result.ok) throw new Error('Could not provision fixture session');
+      return (await result.json()).state.sessionId;
+    }, code));
+    return sessions.get(code);
+  };
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(baseURL).hostname));
   await page.unroute('**/api/users');
   await page.setViewportSize({ width: 1366, height: 768 });
@@ -45,10 +56,10 @@ async (page) => {
   await page.getByRole('button', { name: 'Atualizar', exact: true }).waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 
-  await page.goto(`${baseURL}/tv?room=MDX26`);
+  await page.goto(`${baseURL}/tv?room=MDX26&session=${await ensureSession('MDX26')}&mode=control`);
   const moderation = page.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true });
   await moderation.click();
-  const controls = page.getByRole('dialog', { name: 'Moderação · MDX26', exact: true });
+  const controls = page.getByRole('dialog', { name: /Moderação · .+ · MDX26/ });
   await controls.getByRole('button', { name: /^(Fechar entradas · manter rodada|Reabrir entradas)$/ }).waitFor();
   assert.equal(await controls.getByLabel('Transferir responsabilidade', { exact: true }).count(), 0);
   assert.equal(await page.getByRole('banner').getByRole('button', { name: /modera/i }).count(), 0);
@@ -68,9 +79,9 @@ async (page) => {
   await page.getByLabel('Sala', { exact: true }).selectOption('MDX26');
   assert.equal(await page.getByLabel('Sala', { exact: true }).getByRole('option', { name: 'Todas as salas — manutenção global', exact: true }).count(), 0);
   for (const code of ['MDX26', 'PALCO2']) {
-    await page.goto(`${baseURL}/tv?room=${code}`);
+    await page.goto(`${baseURL}/tv?room=${code}&session=${await ensureSession(code)}&mode=control`);
     await page.getByRole('button', { name: `Abrir moderação da sala ${code}`, exact: true }).click();
-    const roomControls = page.getByRole('dialog', { name: `Moderação · ${code}`, exact: true });
+    const roomControls = page.getByRole('dialog', { name: new RegExp(`Moderação · .+ · ${code}`) });
     await roomControls.getByRole('button', { name: /^(Fechar entradas · manter rodada|Reabrir entradas)$/ }).waitFor();
     assert.equal(await roomControls.getByText('Qualquer conta da organização pode moderar esta sala.', { exact: true }).isVisible(), true);
     assert.equal(await roomControls.getByRole('combobox').count(), 0);
@@ -81,7 +92,7 @@ async (page) => {
   const tv = await page.context().newPage();
   const player = await page.context().newPage();
   try {
-    await tv.goto(`${baseURL}/tv?room=MDX26`);
+    await tv.goto(`${baseURL}/tv?room=MDX26&session=${await ensureSession('MDX26')}&mode=control`);
     await tv.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).waitFor();
     await player.goto(`${baseURL}/play?room=MDX26`);
     await player.waitForFunction(() => document.querySelector('main'));
@@ -114,7 +125,10 @@ async (page) => {
     const create = page.getByRole('dialog', { name: 'Criar sala de TV', exact: true });
     await create.getByLabel('Nome da sala', { exact: true }).fill('Nova arena');
     await create.getByLabel('Código da sala', { exact: true }).fill('MDX26');
-    await create.getByRole('button', { name: 'Criar e abrir telão', exact: true }).click();
+    await create.getByRole('button', { name: 'Criar sala e escolher sessão', exact: true }).click();
+    await page.getByRole('heading', { name: 'Criar sessão de jogo', exact: true }).waitFor();
+    sessions.delete('MDX26');
+    await page.goto(`${baseURL}/tv?room=MDX26&session=${await ensureSession('MDX26')}&mode=control`);
     await page.getByRole('button', { name: 'Abrir moderação da sala MDX26', exact: true }).waitFor();
   } finally { await tv.close(); await player.close(); }
   await page.goto(`${baseURL}/admin`);

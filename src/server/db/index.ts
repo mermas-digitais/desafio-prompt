@@ -23,6 +23,7 @@ import type {
 const { Pool, Client } = pg;
 
 export interface StoredMatchRecord {
+  sessionId?: string | null;
   id: string;
   roomCode: string;
   challengeId: string;
@@ -40,6 +41,13 @@ export interface StoredRoomRecord {
   moderatorId: string | null; // Legacy data only; never used for authorization or new assignments.
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StoredGameSession {
+  id: string; roomCode: string; name: string; status: 'active' | 'ended' | 'interrupted'; createdBy: string | null; createdAt: string;
+}
+export interface ActiveParticipation {
+  id: string; deviceId: string; profileId: string; sessionId: string; roundToken: string;
 }
 
 export interface StaffUser {
@@ -74,6 +82,8 @@ interface LocalPlayerRow {
 }
 
 interface LocalDbData {
+  gameSessions: StoredGameSession[];
+  activeParticipations: ActiveParticipation[];
   players: LocalPlayerRow[];
   matches: StoredMatchRecord[];
   rooms: StoredRoomRecord[];
@@ -90,7 +100,8 @@ export class AppDatabase {
   private connected = false;
   private useLocalDb = false;
   private pgVersion = 'PostgreSQL 18';
-  private localData: LocalDbData = { players: [], matches: [], rooms: [], staffUsers: [], staffSessions: [], authAttempts: [] };
+  private localData: LocalDbData = { players: [], matches: [], rooms: [], staffUsers: [], staffSessions: [], authAttempts: [], gameSessions: [], activeParticipations: [] };
+  private runtimeClient: pg.PoolClient | null = null;
   private readonly localFile: string | null;
 
   constructor(options: { localFile?: string | null } = {}) {
@@ -110,13 +121,15 @@ export class AppDatabase {
       const raw = fs.readFileSync(this.localFile, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<LocalDbData>;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid local database');
-      for (const key of ['players', 'matches', 'rooms', 'staffUsers', 'staffSessions', 'authAttempts'] as const) {
+      for (const key of ['players', 'matches', 'rooms', 'staffUsers', 'staffSessions', 'authAttempts', 'gameSessions', 'activeParticipations'] as const) {
         if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`Invalid local database: ${key}`);
       }
       if (!parsed.staffUsers || parsed.rooms?.some((r) => r.moderatorId === undefined) || parsed.players?.some((p) => !p.roomCode)) {
         fs.copyFileSync(this.localFile, `${this.localFile}.pre-security-${crypto.randomUUID()}.bak`);
       }
       this.localData = {
+        gameSessions: parsed.gameSessions ?? [],
+        activeParticipations: parsed.activeParticipations ?? [],
         staffUsers: parsed.staffUsers ?? [],
         staffSessions: parsed.staffSessions ?? [],
         authAttempts: parsed.authAttempts ?? [],
@@ -333,6 +346,19 @@ export class AppDatabase {
 
           ALTER TABLE rooms ADD COLUMN IF NOT EXISTS moderator_id UUID REFERENCES staff_users(id) ON DELETE SET NULL;
           CREATE INDEX IF NOT EXISTS idx_rooms_moderator ON rooms(moderator_id);
+
+          ALTER TABLE matches ADD COLUMN IF NOT EXISTS session_id UUID;
+          CREATE TABLE IF NOT EXISTS game_sessions (
+            id UUID PRIMARY KEY, room_code VARCHAR(32) NOT NULL REFERENCES rooms(code) ON DELETE CASCADE,
+            name VARCHAR(80) NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'interrupted')),
+            created_by UUID REFERENCES staff_users(id) ON DELETE SET NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_game_sessions_room ON game_sessions(room_code);
+          CREATE TABLE IF NOT EXISTS active_participations (
+            id UUID UNIQUE NOT NULL, device_id VARCHAR(128) PRIMARY KEY,
+            profile_id UUID UNIQUE NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+            session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE, round_token TEXT NOT NULL
+          );
 
         `);
         await client.query('COMMIT');
@@ -840,6 +866,7 @@ export class AppDatabase {
       roomCode: targetRoom,
       roomName,
       finishedAt: match.createdAt instanceof Date ? match.createdAt.toISOString() : match.createdAt,
+      sessionId: match.sessionId ?? undefined,
       challengeTitle: challenge.title,
       challengeImageUrl: challenge.imageUrl,
       winnerNickname: winner?.nickname ?? null,
@@ -849,6 +876,7 @@ export class AppDatabase {
   }
 
   public async commitRound(params: {
+    sessionId?: string;
     roomCode: string;
     roundId: string;
     roundToken: string;
@@ -894,7 +922,7 @@ export class AppDatabase {
         updates.set(stats.deviceId, { newHighScore, updatedProfile: profile });
       }
       const evaluations = enrichedResults();
-      staged.matches.push({ id: crypto.randomUUID(), roomCode, roundId: params.roundId, roundToken: params.roundToken, challengeId: params.challengeId, winnerPlayerId, resultsJson: JSON.stringify(evaluations), createdAt: now });
+      staged.matches.push({ id: crypto.randomUUID(), roomCode, sessionId: params.sessionId, roundId: params.roundId, roundToken: params.roundToken, challengeId: params.challengeId, winnerPlayerId, resultsJson: JSON.stringify(evaluations), createdAt: now });
       this.localData = staged;
       try {
         this.saveLocalStore();
@@ -925,9 +953,104 @@ export class AppDatabase {
         updates.set(stats.deviceId, { newHighScore: stats.roundScore > player.highScore, updatedProfile: { ...profile, avatar: profile.avatar as AvatarId } });
       }
       const evaluations = enrichedResults();
-      await tx.insert(schema.matches).values({ roomCode, roundId: params.roundId, roundToken: params.roundToken, challengeId: params.challengeId, winnerPlayerId, resultsJson: JSON.stringify(evaluations) });
+      await tx.insert(schema.matches).values({ roomCode, sessionId: params.sessionId, roundId: params.roundId, roundToken: params.roundToken, challengeId: params.challengeId, winnerPlayerId, resultsJson: JSON.stringify(evaluations) });
       return evaluations;
     });
+  }
+
+  /** One authoritative runtime: deployments must stop the old worker first. */
+  public async startGameRuntime(onLost: () => void): Promise<void> {
+    if (!this.useLocalDb) {
+      const client = await this.pool!.connect();
+      const result = await client.query('SELECT pg_try_advisory_lock(7140, 1) AS acquired');
+      if (!result.rows[0]?.acquired) { client.release(); throw new Error('Another game runtime is active. Stop it before deploying.'); }
+      this.runtimeClient = client;
+      client.on('error', onLost);
+      await this.ensureDb().transaction(async (tx) => {
+        await tx.update(schema.gameSessions).set({ status: 'interrupted' }).where(eq(schema.gameSessions.status, 'active'));
+        await tx.delete(schema.activeParticipations);
+      });
+    } else {
+      const previous = this.localData;
+      this.localData = { ...previous, gameSessions: previous.gameSessions.map((session) => session.status === 'active' ? { ...session, status: 'interrupted' as const } : session), activeParticipations: [] };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+    }
+  }
+
+  public async stopGameRuntime(): Promise<void> {
+    if (this.runtimeClient) {
+      const client = this.runtimeClient; this.runtimeClient = null;
+      try { await client.query('SELECT pg_advisory_unlock(7140, 1)'); } finally { client.release(); }
+    }
+  }
+
+  public async close(): Promise<void> {
+    try { await this.stopGameRuntime(); }
+    finally { await this.pool?.end(); this.pool = null; this.db = null; this.connected = false; }
+  }
+
+  public async getGameSessions(): Promise<StoredGameSession[]> {
+    if (this.useLocalDb) return this.localData.gameSessions.map((session) => ({ ...session }));
+    return (await this.ensureDb().select().from(schema.gameSessions)).map((session) => ({ ...session, createdAt: session.createdAt.toISOString() }));
+  }
+
+  public async createGameSession(session: Omit<StoredGameSession, 'status' | 'createdAt'>): Promise<void> {
+    if (this.useLocalDb) {
+      if (!this.localData.rooms.some((room) => room.code === session.roomCode)) throw new Error('Unknown room');
+      if (this.localData.gameSessions.some((entry) => entry.id === session.id)) throw new Error('Session already exists');
+      const previous = this.localData;
+      this.localData = { ...previous, gameSessions: [...previous.gameSessions, { ...session, status: 'active', createdAt: new Date().toISOString() }] };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return;
+    }
+    await this.ensureDb().insert(schema.gameSessions).values(session);
+  }
+
+  public async finishGameSession(sessionId: string): Promise<void> {
+    if (this.useLocalDb) {
+      const previous = this.localData;
+      this.localData = { ...previous, gameSessions: previous.gameSessions.map((session) => session.id === sessionId ? { ...session, status: 'ended' as const } : session), activeParticipations: previous.activeParticipations.filter((entry) => entry.sessionId !== sessionId) };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return;
+    }
+    await this.ensureDb().transaction(async (tx) => {
+      await tx.update(schema.gameSessions).set({ status: 'ended' }).where(eq(schema.gameSessions.id, sessionId));
+      await tx.delete(schema.activeParticipations).where(eq(schema.activeParticipations.sessionId, sessionId));
+    });
+  }
+
+  public async getParticipation(deviceId: string): Promise<ActiveParticipation | null> {
+    if (this.useLocalDb) return this.localData.activeParticipations.find((entry) => entry.deviceId === deviceId) ?? null;
+    return (await this.ensureDb().select().from(schema.activeParticipations).where(eq(schema.activeParticipations.deviceId, deviceId)).limit(1))[0] ?? null;
+  }
+
+  public async acquireParticipation(claim: ActiveParticipation): Promise<boolean> {
+    if (this.useLocalDb) {
+      if (this.localData.activeParticipations.some((entry) => entry.deviceId === claim.deviceId || entry.profileId === claim.profileId)) return false;
+      const session = this.localData.gameSessions.find((entry) => entry.id === claim.sessionId && entry.status === 'active');
+      if (!session || !this.localData.players.some((player) => player.id === claim.profileId && player.deviceId === claim.deviceId && player.roomCode === session.roomCode)) return false;
+      const previous = this.localData;
+      this.localData = { ...previous, activeParticipations: [...previous.activeParticipations, { ...claim }] };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return true;
+    }
+    return this.ensureDb().transaction(async (tx) => {
+      const [session] = await tx.select().from(schema.gameSessions).where(and(eq(schema.gameSessions.id, claim.sessionId), eq(schema.gameSessions.status, 'active'))).for('share');
+      if (!session) return false;
+      const [profile] = await tx.select({ id: schema.players.id }).from(schema.players).where(and(eq(schema.players.id, claim.profileId), eq(schema.players.deviceId, claim.deviceId), eq(schema.players.roomCode, session.roomCode))).for('key share');
+      if (!profile) return false;
+      return (await tx.insert(schema.activeParticipations).values(claim).onConflictDoNothing().returning({ id: schema.activeParticipations.id })).length === 1;
+    });
+  }
+
+  public async releaseParticipation(claim: ActiveParticipation): Promise<void> {
+    if (this.useLocalDb) {
+      const previous = this.localData;
+      this.localData = { ...previous, activeParticipations: previous.activeParticipations.filter((entry) => !(entry.id === claim.id && entry.sessionId === claim.sessionId && entry.roundToken === claim.roundToken)) };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return;
+    }
+    await this.ensureDb().delete(schema.activeParticipations).where(and(eq(schema.activeParticipations.id, claim.id), eq(schema.activeParticipations.sessionId, claim.sessionId), eq(schema.activeParticipations.roundToken, claim.roundToken)));
   }
 
   public async getChallenges(): Promise<ChallengeSeedData[]> {
@@ -1173,6 +1296,8 @@ export class AppDatabase {
       const previous = this.localData;
       this.localData = { ...previous,
         rooms: previous.rooms.filter((room) => room.code !== roomCode),
+        gameSessions: previous.gameSessions.filter((session) => session.roomCode !== roomCode),
+        activeParticipations: previous.activeParticipations.filter((entry) => !previous.gameSessions.some((session) => session.id === entry.sessionId && session.roomCode === roomCode)),
         players: previous.players.filter((player) => player.roomCode !== roomCode),
         matches: previous.matches.filter((match) => match.roomCode !== roomCode),
       };

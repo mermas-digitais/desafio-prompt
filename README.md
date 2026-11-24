@@ -67,6 +67,8 @@ npm run dev
 
 ## 🐳 Deploy no Coolify v4.7 (Produção)
 
+**Sessões simultâneas:** veja [operação, migração e testes](docs/multi-session.md). Cada sala admite duas sessões independentes, com ranking compartilhado e participação exclusiva por navegador. Use um único worker e **pare a versão anterior antes de iniciar a nova**; deploy com sobreposição não é compatível. Reiniciar interrompe jogos ativos, preservando perfis e resultados já gravados.
+
 1. **Subdomínio no Hostinger DNS:**
    * Apontamento tipo `A`: `dprompt.mermasdigitais.com.br` -> IP do servidor Coolify (`189.90.44.226`).
 2. **No Projeto Coolify (`mdx26-desafio-prompt`):**

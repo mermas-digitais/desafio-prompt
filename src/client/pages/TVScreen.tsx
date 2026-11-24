@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, Zap } from 'lucide-react';
-import { useSearch } from '@tanstack/react-router';
+import { ArrowLeft, Lightbulb, Zap } from 'lucide-react';
+import { Link, useSearch } from '@tanstack/react-router';
+import { RoomSessionsScreen } from './RoomSessionsScreen';
+import { useAuthStore } from '../store/useAuthStore';
 import { useGameStore } from '../store/useGameStore';
 import { useTVUiStore } from '../store/useTVUiStore';
 import { useNetworkConfig } from '../hooks/useNetworkConfig';
@@ -20,12 +22,21 @@ import { TVEvaluatingView } from '../components/tv/TVEvaluatingView';
 import { TVRevealingView } from '../components/tv/TVRevealingView';
 import { TVPodiumView } from '../components/tv/TVPodiumView';
 import { TVModerationModal } from '../components/tv/TVModerationModal';
+import { canControlSession, parseTVMode } from '../lib/sessionNavigation';
 
 export const TVScreen: React.FC = () => {
+  const search = useSearch({ strict: false }) as { room?: string; session?: string };
+  return search.session ? <ActiveTVScreen /> : <RoomSessionsScreen roomCode={(search.room || 'MDX26').toUpperCase().trim()} />;
+};
+
+const ActiveTVScreen: React.FC = () => {
   const roomState = useGameStore((s) => s.roomState);
   const phase = roomState.phase;
   const joinSessionRoom = useGameStore((s) => s.joinSessionRoom);
-  const search = useSearch({ strict: false }) as { room?: string };
+  const search = useSearch({ strict: false }) as { room?: string; session?: string; mode?: string };
+  const { user, loaded, refresh } = useAuthStore();
+  const mode = parseTVMode(search.mode);
+  const canControl = canControlSession(mode, user);
   const requestedCode = (search.room || 'MDX26').toUpperCase().trim();
   const connectionError = useGameStore((s) => s.connectionError);
 
@@ -37,8 +48,15 @@ export const TVScreen: React.FC = () => {
   const hintUnlockBanner = useTVUiStore((s) => s.hintUnlockBanner);
 
   useEffect(() => {
-    joinSessionRoom(requestedCode);
-  }, [joinSessionRoom, requestedCode]);
+    joinSessionRoom(requestedCode, search.session);
+  }, [joinSessionRoom, requestedCode, search.session]);
+  useEffect(() => { void refresh().catch(() => {}); }, [refresh]);
+  useEffect(() => { setIsModerationOpen(false); }, [mode, canControl, search.session]);
+  useEffect(() => {
+    const oldTitle = document.title;
+    document.title = `${roomState.sessionName || 'Sessão'} · ${canControl ? 'Controlando' : mode === 'control' ? 'Acesso ao controle' : 'Assistindo'} · Desafio de Prompt`;
+    return () => { document.title = oldTitle; };
+  }, [roomState.sessionName, mode, canControl]);
 
   // Hooks modulares de URL local/produção, posicionamento persistente da rádio e coreografia sonora
   const { playUrl, playDisplayUrl } = useNetworkConfig();
@@ -47,8 +65,12 @@ export const TVScreen: React.FC = () => {
 
   const isInGameHeaderMode = phase !== 'IDLE';
 
+  const controlReturnTo = `/tv?${new URLSearchParams({ room: requestedCode, session: search.session || '', mode: 'control' })}`;
+  if (roomState.sessionId !== search.session || roomState.roomCode !== requestedCode) return <main className="org-surface p-6 space-y-4">{connectionError ? <><h1 className="font-display text-2xl">Sessão indisponível</h1><p role="alert">{connectionError}</p></> : <p role="status">Conectando à sessão…</p>}<Link to="/tv" search={{ room: requestedCode }} className="org-button">Ver sessões desta sala</Link></main>;
+  if (mode === 'control' && !canControl) return <main className="org-surface p-6 space-y-4"><h1 className="font-display text-2xl">{roomState.sessionName} · Controle da sessão</h1><p role="status">{!loaded ? 'Verificando sua conta…' : user?.mustChangePassword ? 'Conclua a troca inicial de senha para controlar esta sessão.' : 'Entre com uma conta da organização para controlar esta sessão.'}</p>{loaded && <Link to="/admin" search={{ returnTo: controlReturnTo }} className="org-button org-button-primary">{user ? 'Concluir meu acesso' : 'Entrar para controlar'}</Link>}<Link to="/tv" search={{ room: requestedCode, session: search.session, mode: 'watch' }} className="org-button">Só assistir</Link></main>;
+
   return (
-    <div className="h-screen max-h-screen w-screen flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-hidden select-none">
+    <div className="min-h-screen lg:h-screen lg:max-h-screen w-full flex flex-col bg-[#FAF7FF] text-[#330043] relative overflow-x-hidden lg:overflow-hidden select-none">
       {/* Cenário Arquitetural Mermãs Digitais • MDX STEAM 2026 */}
       <EventFloatingAssets
         variant="tv"
@@ -61,7 +83,9 @@ export const TVScreen: React.FC = () => {
         mode="tv"
         isMuted={isMuted}
         onToggleMute={toggleMute}
-        rightSlot={isInGameHeaderMode ? <div
+        sessionInfo={<div className="min-w-0 max-w-[130px] sm:max-w-[240px] text-right leading-tight"><p className="text-xs text-[#330043] font-semibold truncate" title={`${roomState.roomName} / ${roomState.sessionName}`}>{roomState.sessionName}</p><p className="text-[10px] sm:text-xs text-[#6E4F7D]"><span>{requestedCode} · </span><Link to="/tv" search={{ room: requestedCode, session: search.session, mode: mode === 'watch' ? 'control' : 'watch' }} className="inline-flex items-center min-h-8 underline-offset-4 hover:underline" title={canControl ? 'Mudar para somente assistir' : 'Acessar controle da sessão'}>{canControl ? 'Controlando' : 'Assistindo'}</Link></p></div>}
+        rightSlot={<Link to="/tv" search={{ room: requestedCode }} aria-label="Ver sessões desta sala" title="Ver sessões desta sala" className="inline-flex items-center justify-center w-8 h-8 text-[#6E4F7D] hover:text-[#330043]"><ArrowLeft size={16} aria-hidden="true" /></Link>}
+        headerMusicSlot={isInGameHeaderMode ? <div
           ref={headerRadioSlotRef}
           className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
           aria-hidden="true"
@@ -85,7 +109,7 @@ export const TVScreen: React.FC = () => {
               }
             : undefined
         }
-        className={`z-40 transition-all duration-300 ${
+        className={`hidden lg:block z-40 transition-all duration-300 ${
           radioRect
             ? ''
             : phase === 'IDLE'
@@ -154,7 +178,8 @@ export const TVScreen: React.FC = () => {
       </div>
 
       {/* Container Widescreen 100vh Travado (Sem Scroll, Sem Vazar pelo Bottom e Sem Piscar a Tela!) */}
-      <main className="max-w-[1840px] w-full mx-auto px-5 lg:px-8 py-3 flex-1 min-h-0 overflow-hidden flex flex-col justify-between relative z-10">
+      <main className="max-w-[1840px] w-full mx-auto px-4 lg:px-8 py-3 flex-1 min-h-0 lg:overflow-hidden flex flex-col gap-3 relative z-10">
+        <h1 className="sr-only">{roomState.roomName} / {roomState.sessionName} · {canControl ? 'Controlando' : 'Assistindo'}</h1>
         {connectionError && <p role="alert" className="bg-red-50 text-red-800 p-3 rounded-xl">{connectionError}</p>}
         {phase === 'IDLE' && (
           <motion.div
@@ -162,31 +187,31 @@ export const TVScreen: React.FC = () => {
             initial={{ opacity: 0.7 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.15 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch flex-1 min-h-0 overflow-hidden"
+            className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch flex-1 min-h-0 lg:overflow-hidden"
           >
             {/* COLUNA ESQUERDA (8 cols): Ranking Geral + Galeria IA com Prompt Permanentemente Borrado */}
-            <div className="lg:col-span-8 flex flex-col justify-between gap-3 min-h-0 overflow-hidden">
+            <div className="order-2 lg:order-1 lg:col-span-8 flex flex-col justify-between gap-3 min-h-0 lg:overflow-hidden">
               <TVRankingCard />
               <TVShowcaseGalleryBanner />
             </div>
 
             {/* COLUNA DIREITA (4 cols): Slot da Música no Topo + Card Escaneie para Jogar */}
-            <div className="lg:col-span-4 flex flex-col justify-between gap-3 min-h-0 overflow-hidden">
+            <div className="order-1 lg:order-2 lg:col-span-4 flex flex-col justify-between gap-3 min-h-0 lg:overflow-hidden">
               <div
                 ref={idleRadioSlotRef}
-                className="w-full h-[126px] shrink-0"
+                className="hidden lg:block w-full h-[126px] shrink-0"
                 aria-hidden="true"
               />
               <TVQrCodeJoinCard
                 playUrl={playUrl}
                 playDisplayUrl={playDisplayUrl}
-                onOpenModeration={() => setIsModerationOpen(true)}
+                onOpenModeration={canControl ? () => setIsModerationOpen(true) : undefined}
               />
             </div>
           </motion.div>
         )}
 
-        {phase === 'LOBBY' && <TVLobbyView playUrl={playUrl} />}
+        {phase === 'LOBBY' && <TVLobbyView playUrl={playUrl} onOpenModeration={canControl ? () => setIsModerationOpen(true) : undefined} />}
 
         {phase === 'COUNTDOWN' && <TVCountdownView />}
 
@@ -201,7 +226,7 @@ export const TVScreen: React.FC = () => {
 
       {/* MODAL DE MODERAÇÃO E GESTÃO DE SESSÃO DA TV */}
       <TVModerationModal
-        isOpen={isModerationOpen}
+        isOpen={isModerationOpen && canControl}
         onClose={() => setIsModerationOpen(false)}
         currentRoomCode={requestedCode}
       />

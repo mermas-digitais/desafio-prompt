@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { getSocket } from '../store/useGameStore';
+import { getSocket, useGameStore } from '../store/useGameStore';
 import { api } from '../lib/api';
+import { useSearch } from '@tanstack/react-router';
+import { canControlSession } from '../lib/sessionNavigation';
 
 export interface RoomMetadata {
   roomCode: string; roomName: string;
   isOpen: boolean; phase: string; playersCount: number; roundToken: string;
+  sessionsCount?: number;
 }
 
 export function useRoomAccess(roomCode: string) {
+  const search = useSearch({ strict: false }) as { mode?: string };
+  const state = useGameStore((store) => store.roomState);
   const user = useAuthStore((state) => state.user);
   const refreshMe = useAuthStore((state) => state.refresh);
   const [room, setRoom] = useState<RoomMetadata | null>(null);
@@ -26,6 +31,7 @@ export function useRoomAccess(roomCode: string) {
     const timer = setInterval(update, 10000);
     return () => { socket.off('rooms:updated', update); clearInterval(timer); };
   }, [refresh, refreshMe]);
-  const canManage = Boolean(user && !user.mustChangePassword && room?.roomCode === roomCode);
-  return { user, room: room?.roomCode === roomCode ? room : null, canManage, refresh };
+  const canManage = canControlSession(search.mode, user) && room?.roomCode === roomCode;
+  const currentRoom = room?.roomCode === roomCode ? room : null;
+  return { user, room: currentRoom && state.roomCode === roomCode && state.sessionId ? { ...currentRoom, isOpen: state.isOpen, phase: state.phase, roundToken: state.roundToken } : currentRoom, canManage, refresh };
 }

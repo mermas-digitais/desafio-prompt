@@ -10,6 +10,7 @@ interface BandeirolasHeaderProps {
   onToggleMute?: () => void;
   rightSlot?: React.ReactNode;
   headerMusicSlot?: React.ReactNode;
+  sessionInfo?: React.ReactNode;
   mode?: 'tv' | 'play' | 'home';
 }
 
@@ -20,6 +21,7 @@ export const BandeirolasHeader: React.FC<BandeirolasHeaderProps> = React.memo(
     onToggleMute,
     rightSlot,
     headerMusicSlot,
+    sessionInfo,
     mode = 'tv',
   }) => {
     const roomCode = useGameStore((s) => s.roomState.roomCode);
@@ -96,7 +98,7 @@ export const BandeirolasHeader: React.FC<BandeirolasHeaderProps> = React.memo(
 
           {/* Direita: Badge Único Combinado (Sala + Status) + RightSlot + Botão Circular de Volume */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {mode !== 'home' && <div className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-[#FAF7FF] border border-[#DDC7F8] text-[11px] sm:text-xs font-quicksand font-bold text-[#330043] whitespace-nowrap">
+            {sessionInfo || (mode !== 'home' && <div className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-[#FAF7FF] border border-[#DDC7F8] text-[11px] sm:text-xs font-quicksand font-bold text-[#330043] whitespace-nowrap">
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${
                   isConnected ? 'bg-emerald-500' : 'bg-rose-400'
@@ -106,7 +108,7 @@ export const BandeirolasHeader: React.FC<BandeirolasHeaderProps> = React.memo(
                 <span className="hidden sm:inline">Sala </span>
                 {roomCode}
               </span>
-            </div>}
+            </div>)}
 
             {rightSlot}
 

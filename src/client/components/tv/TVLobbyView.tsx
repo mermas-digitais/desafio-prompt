@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
-import { useRoomAccess } from '../../hooks/useRoomAccess';
-import { AccessibleDialog } from '../AccessibleDialog';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
-import { CheckCircle2, Clock, ExternalLink, Users, UserX, XCircle, Zap } from 'lucide-react';
+import { CheckCircle2, Clock, ExternalLink, Shield, Users } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { formatTimer } from '../../helpers/formatters';
 import { AvatarBadge } from '../AvatarBadge';
@@ -14,34 +12,19 @@ import {
   getCareerAchievements,
   getPlayerPowerTier,
 } from '../../../shared/achievements';
-import { ALL_PLAYER_SLOTS, MAX_ROOM_PLAYERS, type PlayerSlot } from '../../../shared/types';
+import { ALL_PLAYER_SLOTS, MAX_ROOM_PLAYERS } from '../../../shared/types';
 
 export interface TVLobbyViewProps {
   playUrl: string;
+  onOpenModeration?: () => void;
 }
 
-export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) => {
+export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl, onOpenModeration }) => {
   const players = useGameStore((s) => s.roomState.players);
   const lobbyTimeLeft = useGameStore((s) => s.roomState.lobbyTimeLeft);
   const roomCode = useGameStore((s) => s.roomState.roomCode);
-  const roundToken = useGameStore((s) => s.roomState.roundToken);
-  const cancelLobby = useGameStore((s) => s.cancelLobby);
-  const startWithBotsNow = useGameStore((s) => s.startWithBotsNow);
-  const kickPlayer = useGameStore((s) => s.kickPlayer);
+  const sessionName = useGameStore((s) => s.roomState.sessionName);
   const isOpen = useGameStore((s) => s.roomState.isOpen);
-  const { canManage } = useRoomAccess(roomCode);
-  const [confirmation, setConfirmation] = useState<{ text: string; label: string; destructive?: boolean; action: () => Promise<{ ok: boolean; error?: string }> } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleKick = (playerNickname: string, playerId: string, slot: PlayerSlot) => {
-    setConfirmation({ label: 'Remover da rodada', destructive: true, text: `Remover ${playerNickname} (posição ${slot}) da rodada na sala ${roomCode}? Ela não poderá voltar nesta rodada.`, action: () => kickPlayer({
-        roomCode,
-        playerId,
-        slot,
-        reason: 'Removido pelo moderador da sala.',
-      }) });
-  };
 
   return (
     <motion.div
@@ -49,10 +32,9 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="flex-1 min-h-0 overflow-hidden flex flex-col justify-between gap-3.5"
+      className="flex-1 min-h-0 lg:overflow-hidden flex flex-col justify-between gap-3.5"
     >
       {/* Barra Superior Limpa com ÚNICO Relógio em Destaque (Sem Contadores Duplicados) */}
-      {error && <p role="alert" className="p-3 bg-red-50 text-red-800 rounded-xl">{error}</p>}
       <div className="bg-white rounded-3xl p-4 lg:p-5 border border-[#DDC7F8] shadow-[0_12px_36px_rgba(51,0,67,0.06)] flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#9747FF] bg-[#FAF5FF] px-3 py-1 rounded-full border border-[#E9D8FD]">
@@ -62,7 +44,7 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
             </span>
           </span>
           <h2 className="font-display text-lg lg:text-2xl text-[#330043] mt-1">
-            Escaneie o QR Code de uma posição livre para entrar na Arena MDX
+            Escaneie para entrar em {sessionName || 'esta sessão'}
           </h2>
           <p className="text-xs text-[#6E4F7D] font-medium mt-0.5">
             A partida inicia automaticamente ao completar {MAX_ROOM_PLAYERS} participantes ou ao final do relógio ao lado.
@@ -85,22 +67,12 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
             </div>
           </div>
 
-          {canManage && <button
-            type="button"
-            onClick={() => setConfirmation({ label: 'Iniciar rodada', text: `Iniciar agora a rodada da sala ${roomCode}? As posições vagas serão preenchidas por bots.`, action: () => startWithBotsNow(roomCode) })}
-            className="bg-purple-pink bg-gradient-to-r from-[#9747FF] to-[#FF4A97] hover:opacity-95 text-white font-semibold text-sm px-5 py-3.5 rounded-full shadow-sm inline-flex items-center gap-2 cursor-pointer transition-all whitespace-nowrap"
-          >
-            <Zap className="w-4 h-4" />
-            <span>Iniciar agora com Bot Mermã</span>
-          </button>}
-          {canManage && <button type="button" className="org-button org-button-danger" disabled={busy} onClick={() => setConfirmation({ label: 'Cancelar partida', destructive: true, text: `Cancelar a partida no lobby de ${roomCode}? Todas as participantes serão removidas e o QR atual deixará de funcionar. Perfis, pontos e histórico serão preservados. Para jogar novamente, será necessário escanear o novo QR do telão.`, action: () => cancelLobby(roomCode, roundToken) })}>
-            <XCircle size={18} aria-hidden="true" />Cancelar partida…
-          </button>}
+          {onOpenModeration && <button type="button" onClick={onOpenModeration} aria-label={`Abrir moderação da sala ${roomCode}`} className="inline-flex items-center gap-1.5 min-h-11 px-2 text-xs text-[#6E4F7D] hover:text-[#330043]"><Shield size={15} aria-hidden="true" />Moderar</button>}
         </div>
       </div>
 
       {/* 5 Posições de Jogadores Lado a Lado */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 flex-1 min-h-0 items-stretch overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 flex-1 min-h-0 items-stretch lg:overflow-hidden">
         {ALL_PLAYER_SLOTS.map((slotNum) => {
           const player = players.find((p) => p.slot === slotNum);
 
@@ -132,21 +104,6 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
                       <CheckCircle2 className="w-3 h-3" />
                       <span>Pronta</span>
                     </span>
-                    {canManage && <button
-                      type="button"
-                      onClick={() =>
-                        handleKick(
-                          player.nickname,
-                          player.id,
-                          player.slot
-                        )
-                      }
-                      title={`Remover ${player.nickname} da rodada`}
-                      className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
-                    >
-                      <UserX className="w-3 h-3 text-red-500" />
-                      <span>Kick</span>
-                    </button>}
                   </div>
                 </div>
 
@@ -206,7 +163,7 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
             >
               <div className="w-full flex items-center justify-between gap-1">
                 <span className="text-[11px] font-semibold text-[#545454] bg-white px-2.5 py-0.5 rounded-full border border-[#E9D8FD]">
-                  Slot #{slotNum}
+                  Posição {slotNum}
                 </span>
                 <span className="text-[11px] font-medium text-[#9747FF] animate-pulse">
                   Livre...
@@ -218,10 +175,10 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
                   {isOpen ? <QRCodeSVG value={playUrl} size={116} bgColor="#FFFFFF" fgColor="#330043" /> : <p className="text-sm">Entradas fechadas</p>}
                 </div>
                 <p className="font-semibold text-sm text-[#330043]">
-                  Escaneie para o Slot #{slotNum}
+                  Escaneie para entrar nesta sessão
                 </p>
                 <p className="text-[11px] text-[#545454] mt-0.5">
-                  Vaga disponível nesta rodada
+                  Sua posição será atribuída automaticamente
                 </p>
               </div>
 
@@ -238,14 +195,6 @@ export const TVLobbyView: React.FC<TVLobbyViewProps> = React.memo(({ playUrl }) 
           );
         })}
       </div>
-      <AccessibleDialog open={Boolean(confirmation) && canManage} title={`Confirmar ação · ${roomCode}`} onClose={() => setConfirmation(null)}>
-        <p className="org-description">{confirmation?.text}</p><div className="flex flex-wrap justify-end gap-2 mt-6"><button className="org-button" disabled={busy} onClick={() => setConfirmation(null)}>Voltar</button><button disabled={busy} className={`org-button ${confirmation?.destructive ? 'org-button-danger' : 'org-button-primary'}`} onClick={async () => {
-          if (!confirmation || busy || !canManage) return; setBusy(true); setError('');
-          try { const response = await confirmation.action(); if (!response.ok) setError(response.error || 'Ação recusada. Atualize a sala.'); }
-          catch { setError('Falha de conexão. Atualize antes de repetir.'); }
-          finally { setBusy(false); setConfirmation(null); }
-        }}>{busy ? 'Aguarde…' : confirmation?.label}</button></div>
-      </AccessibleDialog>
     </motion.div>
   );
 });
