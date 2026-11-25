@@ -19,7 +19,10 @@ process.chdir(data);
 const { createApplication } = await import('../src/server/index.ts');
 const { database } = await import('../src/server/db/index.ts');
 const { hashPassword } = await import('../src/server/auth.ts');
-const app = await createApplication();
+const app = await createApplication({ radioCatalog: {
+  async playlist(url) { return { url, title: 'Rádio QA (sem provedor externo)', coverUrl: '', tracks: [{ uri: 'qa-one', title: 'Faixa QA', artist: 'Fixture local' }] }; },
+  async media() { return { videoId: 'abcdefghijk', durationSec: 180 }; },
+} });
 assert.equal(database.isPostgresActive(), false, 'UI fixture must never connect to PostgreSQL');
 const admin = (await database.getStaffUsers())[0];
 await database.updateStaffPassword(admin.id, await hashPassword('review-only-password'));

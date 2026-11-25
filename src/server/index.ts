@@ -14,6 +14,8 @@ import { validateNickname } from './moderation/profanityFilter.js';
 import { RoomManager } from './game/RoomManager.js';
 import { AuthService, HttpError, requestError } from './auth.js';
 import { registerMusicRoutes } from './musicRoutes.js';
+import { registerRadio } from './radio/routes.js';
+import type { RadioCatalog } from './radio/RadioStation.js';
 
 const roomCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{1,12}$/);
 const roomInput = z.object({ roomCode: roomCodeSchema });
@@ -35,7 +37,7 @@ function getLanAddresses(): { primaryIp: string; allIps: string[] } {
   return { primaryIp: candidates[0]?.ip || 'localhost', allIps: candidates.map((c) => c.ip) };
 }
 
-export async function createApplication() {
+export async function createApplication(options: { radioCatalog?: RadioCatalog } = {}) {
   if (process.env.NODE_ENV === 'production' && (process.env.SESSION_SECRET || '').trim().length < 32) throw new Error('Configure SESSION_SECRET antes de iniciar a aplicação em produção.');
   await database.init();
   const auth = new AuthService();
@@ -101,6 +103,7 @@ export async function createApplication() {
     return { spotifyPlaylistUrl: process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '', roomCode: state?.roomCode ?? '', roomName: state?.roomName ?? '', isOpen: state?.isOpen ?? false, roundToken: state?.roundToken ?? '', lanIp: isProd ? '' : primaryIp, allLanIps: isProd ? [] : allIps, publicAppUrl: validPublic ? raw.replace(/\/+$/, '') : isProd ? 'https://dprompt.mermasdigitais.com.br' : '' };
   });
   registerMusicRoutes(fastify);
+  const radio = registerRadio(fastify, io, auth, () => roomManager.isAvailable(), options.radioCatalog);
 
   fastify.get<{ Querystring: { room?: string } }>('/api/admin/ranking', async (req) => {
     const user = await auth.requireUser(req.headers);
@@ -405,7 +408,7 @@ export async function createApplication() {
       return reply.sendFile('index.html');
     });
   }
-  return { fastify, io, roomManager, auth, close: async () => { roomManager.dispose(); await new Promise<void>((resolve) => io.close(() => resolve())); await fastify.close(); await database.close(); } };
+  return { fastify, io, roomManager, radio, auth, close: async () => { radio.close(); roomManager.dispose(); await new Promise<void>((resolve) => io.close(() => resolve())); await fastify.close(); await database.close(); } };
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

@@ -82,6 +82,7 @@ interface LocalPlayerRow {
 }
 
 interface LocalDbData {
+  radioPlaylistUrl?: string;
   gameSessions: StoredGameSession[];
   activeParticipations: ActiveParticipation[];
   players: LocalPlayerRow[];
@@ -124,10 +125,12 @@ export class AppDatabase {
       for (const key of ['players', 'matches', 'rooms', 'staffUsers', 'staffSessions', 'authAttempts', 'gameSessions', 'activeParticipations'] as const) {
         if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`Invalid local database: ${key}`);
       }
+      if (parsed.radioPlaylistUrl !== undefined && typeof parsed.radioPlaylistUrl !== 'string') throw new Error('Invalid local radio settings');
       if (!parsed.staffUsers || parsed.rooms?.some((r) => r.moderatorId === undefined) || parsed.players?.some((p) => !p.roomCode)) {
         fs.copyFileSync(this.localFile, `${this.localFile}.pre-security-${crypto.randomUUID()}.bak`);
       }
       this.localData = {
+        radioPlaylistUrl: parsed.radioPlaylistUrl,
         gameSessions: parsed.gameSessions ?? [],
         activeParticipations: parsed.activeParticipations ?? [],
         staffUsers: parsed.staffUsers ?? [],
@@ -358,6 +361,9 @@ export class AppDatabase {
             id UUID UNIQUE NOT NULL, device_id VARCHAR(128) PRIMARY KEY,
             profile_id UUID UNIQUE NOT NULL REFERENCES players(id) ON DELETE CASCADE,
             session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE, round_token TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS radio_settings (
+            id TEXT PRIMARY KEY CHECK (id = 'global'), playlist_url TEXT NOT NULL
           );
 
         `);
@@ -987,6 +993,21 @@ export class AppDatabase {
   public async close(): Promise<void> {
     try { await this.stopGameRuntime(); }
     finally { await this.pool?.end(); this.pool = null; this.db = null; this.connected = false; }
+  }
+
+  public async getRadioPlaylistUrl(): Promise<string | null> {
+    if (this.useLocalDb) return this.localData.radioPlaylistUrl ?? null;
+    return (await this.ensureDb().select().from(schema.radioSettings).where(eq(schema.radioSettings.id, 'global')).limit(1))[0]?.playlistUrl ?? null;
+  }
+
+  public async setRadioPlaylistUrl(playlistUrl: string): Promise<void> {
+    if (this.useLocalDb) {
+      const previous = this.localData;
+      this.localData = { ...previous, radioPlaylistUrl: playlistUrl };
+      try { this.saveLocalStore(); } catch (error) { this.localData = previous; throw error; }
+      return;
+    }
+    await this.ensureDb().insert(schema.radioSettings).values({ id: 'global', playlistUrl }).onConflictDoUpdate({ target: schema.radioSettings.id, set: { playlistUrl } });
   }
 
   public async getGameSessions(): Promise<StoredGameSession[]> {
