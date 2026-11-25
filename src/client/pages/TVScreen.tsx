@@ -9,9 +9,9 @@ import { useTVUiStore } from '../store/useTVUiStore';
 import { useNetworkConfig } from '../hooks/useNetworkConfig';
 import { usePersistentRadioSlot } from '../hooks/usePersistentRadioSlot';
 import { useTVSoundChoreography } from '../hooks/useTVSoundChoreography';
+import { useRadioStore } from '../store/useRadioStore';
 import { BandeirolasHeader } from '../components/BandeirolasHeader';
 import { EventFloatingAssets } from '../components/EventFloatingAssets';
-import { SpotifyPlayerWidget } from '../components/SpotifyPlayerWidget';
 import { TVRankingCard } from '../components/tv/TVRankingCard';
 import { TVShowcaseGalleryBanner } from '../components/tv/TVShowcaseGalleryBanner';
 import { TVQrCodeJoinCard } from '../components/tv/TVQrCodeJoinCard';
@@ -61,9 +61,20 @@ const ActiveTVScreen: React.FC = () => {
   // Hooks modulares de URL local/produção, posicionamento persistente da rádio e coreografia sonora
   const { playUrl, playDisplayUrl } = useNetworkConfig();
   const { idleRadioSlotRef, headerRadioSlotRef, radioRect } = usePersistentRadioSlot(phase);
+  const setRadioAnchor = useRadioStore((s) => s.setAnchor);
+  const isInGameHeaderMode = phase !== 'IDLE';
   useTVSoundChoreography();
 
-  const isInGameHeaderMode = phase !== 'IDLE';
+  useEffect(() => {
+    if (radioRect && radioRect.width > 0) {
+      setRadioAnchor({ ...radioRect, variant: isInGameHeaderMode ? 'tv-header' : 'tv-idle' });
+    } else {
+      setRadioAnchor(null);
+    }
+  }, [radioRect, isInGameHeaderMode, setRadioAnchor]);
+
+  useEffect(() => () => { setRadioAnchor(null); }, [setRadioAnchor]);
+
 
   const controlReturnTo = `/tv?${new URLSearchParams({ room: requestedCode, session: search.session || '', mode: 'control' })}`;
   if (roomState.sessionId !== search.session || roomState.roomCode !== requestedCode) return <main className="org-surface p-6 space-y-4">{connectionError ? <><h1 className="font-display text-2xl">Sessão indisponível</h1><p role="alert">{connectionError}</p></> : <p role="status">Conectando à sessão…</p>}<Link to="/tv" search={{ room: requestedCode }} className="org-button">Ver sessões desta sala</Link></main>;
@@ -85,44 +96,15 @@ const ActiveTVScreen: React.FC = () => {
         onToggleMute={toggleMute}
         sessionInfo={<div className="min-w-0 max-w-[130px] sm:max-w-[240px] text-right leading-tight"><p className="text-xs text-[#330043] font-semibold truncate" title={`${roomState.roomName} / ${roomState.sessionName}`}>{roomState.sessionName}</p><p className="text-[10px] sm:text-xs text-[#6E4F7D]"><span>{requestedCode} · </span><Link to="/tv" search={{ room: requestedCode, session: search.session, mode: mode === 'watch' ? 'control' : 'watch' }} className="inline-flex items-center min-h-8 underline-offset-4 hover:underline" title={canControl ? 'Mudar para somente assistir' : 'Acessar controle da sessão'}>{canControl ? 'Controlando' : 'Assistindo'}</Link></p></div>}
         rightSlot={<Link to="/tv" search={{ room: requestedCode }} aria-label="Ver sessões desta sala" title="Ver sessões desta sala" className="inline-flex items-center justify-center w-8 h-8 text-[#6E4F7D] hover:text-[#330043]"><ArrowLeft size={16} aria-hidden="true" /></Link>}
-        headerMusicSlot={isInGameHeaderMode ? <div
-          ref={headerRadioSlotRef}
-          className="hidden lg:block w-[290px] xl:w-[330px] h-[48px] shrink-0"
-          aria-hidden="true"
-        /> : undefined}
+        headerMusicSlot={isInGameHeaderMode ? (
+          <div
+            ref={headerRadioSlotRef}
+            className="hidden lg:block w-[320px] xl:w-[370px] h-[48px] shrink-0"
+            aria-hidden="true"
+          />
+        ) : undefined}
       />
 
-      {/* =====================================================================
-          INSTÂNCIA ÚNICA PERSISTENTE DO SPOTIFY PLAYER:
-          - Em IDLE: Fica ancorada no TOPO da Coluna da Direita (acima do card "Escaneie para Jogar")
-          - No Modo de Jogo (!== IDLE): Vai para o Header no topo direito e fica menor!
-          Como é a mesma instância na árvore React, o iframe NUNCA recarrega!
-         ===================================================================== */}
-      <div
-        style={
-          radioRect
-            ? {
-                position: 'fixed',
-                top: `${radioRect.top}px`,
-                left: `${radioRect.left}px`,
-                width: `${radioRect.width}px`,
-              }
-            : undefined
-        }
-        className={`hidden lg:block z-40 transition-all duration-300 ${
-          radioRect
-            ? ''
-            : phase === 'IDLE'
-            ? 'fixed top-20 right-6 lg:right-10 w-[340px] lg:w-[420px]'
-            : 'fixed top-2 right-44 w-[300px]'
-        }`}
-      >
-        <SpotifyPlayerWidget
-          compact={isInGameHeaderMode}
-          inHeader={isInGameHeaderMode}
-          variant={isInGameHeaderMode ? 'header-compact' : 'home-banner'}
-        />
-      </div>
 
       {/* Dock Lateral de Notificações HUD Ao Vivo (Canto Inferior Direito — Não cobre Imagem nem Relógio!) */}
       <div className="pointer-events-none fixed bottom-5 right-6 z-50 flex flex-col items-end gap-2.5 max-w-md">

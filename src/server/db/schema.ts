@@ -89,6 +89,11 @@ export const rooms = pgTable('rooms', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => [index('idx_rooms_moderator').on(table.moderatorId)]);
 
+export const radioSettings = pgTable('radio_settings', {
+  id: text('id').primaryKey(),
+  playlistUrl: text('playlist_url').notNull(),
+});
+
 export const gameSessions = pgTable('game_sessions', {
   id: uuid('id').primaryKey(),
   roomCode: varchar('room_code', { length: 32 }).notNull().references(() => rooms.code, { onDelete: 'cascade' }),

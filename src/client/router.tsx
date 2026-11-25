@@ -11,12 +11,14 @@ import { PlayScreen } from './pages/PlayScreen';
 import { AdminScreen } from './pages/AdminScreen';
 import { TopLoadingBar } from './components/TopLoadingBar';
 import { parseTVMode, safeControlReturnTo, type TVMode } from './lib/sessionNavigation';
+import { GlobalRadioDock } from './components/GlobalRadioDock';
 
 const rootRoute = createRootRoute({
   component: () => (
     <>
       <TopLoadingBar />
       <Outlet />
+      <GlobalRadioDock />
     </>
   ),
 });
