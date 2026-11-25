@@ -8,7 +8,8 @@ test('real PostgreSQL arbitrates global participation, runtime ownership and sim
   assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), 'Only a loopback test database is permitted');
   assert.match(url.pathname, /^\/desafio_session_test_[a-z0-9_]+$/);
   const previous = process.env.DATABASE_URL;
-  process.env.DATABASE_URL = url.toString(); process.env.NODE_ENV = 'test';
+  const previousExclusive = process.env.REQUIRE_EXCLUSIVE_RUNTIME;
+  process.env.DATABASE_URL = url.toString(); process.env.NODE_ENV = 'test'; process.env.REQUIRE_EXCLUSIVE_RUNTIME = 'true';
   const a = new AppDatabase(), b = new AppDatabase();
   try {
     await a.init(); await b.init();
@@ -47,5 +48,6 @@ test('real PostgreSQL arbitrates global participation, runtime ownership and sim
   } finally {
     await a.close(); await b.close();
     if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
+    if (previousExclusive === undefined) delete process.env.REQUIRE_EXCLUSIVE_RUNTIME; else process.env.REQUIRE_EXCLUSIVE_RUNTIME = previousExclusive;
   }
 });

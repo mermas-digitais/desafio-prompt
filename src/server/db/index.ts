@@ -964,14 +964,21 @@ export class AppDatabase {
     });
   }
 
-  /** One authoritative runtime: deployments must stop the old worker first. */
+  /**
+   * Starts the game runtime and cleans stale sessions from previous boots.
+   * Advisory lock enforcement is opt-in (REQUIRE_EXCLUSIVE_RUNTIME=true) so Coolify
+   * zero-downtime rolling updates can bring up the new container before stopping the old one.
+   */
   public async startGameRuntime(onLost: () => void): Promise<void> {
     if (!this.useLocalDb) {
-      const client = await this.pool!.connect();
-      const result = await client.query('SELECT pg_try_advisory_lock(7140, 1) AS acquired');
-      if (!result.rows[0]?.acquired) { client.release(); throw new Error('Another game runtime is active. Stop it before deploying.'); }
-      this.runtimeClient = client;
-      client.on('error', onLost);
+      const requireExclusive = process.env.REQUIRE_EXCLUSIVE_RUNTIME === 'true';
+      if (requireExclusive) {
+        const client = await this.pool!.connect();
+        const result = await client.query('SELECT pg_try_advisory_lock(7140, 1) AS acquired');
+        if (!result.rows[0]?.acquired) { client.release(); throw new Error('Another game runtime is active. Stop it before deploying.'); }
+        this.runtimeClient = client;
+        client.on('error', onLost);
+      }
       await this.ensureDb().transaction(async (tx) => {
         await tx.update(schema.gameSessions).set({ status: 'interrupted' }).where(eq(schema.gameSessions.status, 'active'));
         await tx.delete(schema.activeParticipations);
